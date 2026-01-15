@@ -32,25 +32,23 @@ const ranchPayloadSchema = z.object({
   mail_zip: z.string().optional(),
 });
 
-async function parseRanchRequest(req: any) {
-  // multipart vs json: support both
-  const isMultipart = typeof req.isMultipart === "function" && req.isMultipart();
+async function parseRanchRequest(req: any): Promise<{
+  body: Record<string, any>;
+  files: any[];
+}> {
+  const contentType = String(req.headers?.["content-type"] ?? "");
+  const isMultipart = contentType.includes("multipart/form-data");
 
-  if (isMultipart) {
-    // Ensure decorator exists
-    const files = typeof req.saveRequestFiles === "function" ? await req.saveRequestFiles() : [];
-    const body = (req.body ?? {}) as Record<string, any>;
-    return { mode: "multipart" as const, body, files };
+  if (isMultipart && typeof req.saveRequestFiles === "function") {
+    const files = await req.saveRequestFiles();
+    return { body: (req.body ?? {}) as Record<string, any>, files };
   }
 
-  return { mode: "json" as const, body: (req.body ?? {}) as Record<string, any>, files: [] as any[] };
+  return { body: (req.body ?? {}) as Record<string, any>, files: [] as any[] };
 }
 
 export async function ranchRoutes(app: FastifyInstance) {
-  // CREATE ranch (and default Transfer herd)
   app.post("/ranches", { preHandler: requireAuth }, async (req, reply) => {
-    req.log.info({ msg: "RANCH ROUTE VERSION = 2026-01-01-A" });
-
     try {
       const { body, files } = await parseRanchRequest(req);
 
@@ -63,13 +61,10 @@ export async function ranchRoutes(app: FastifyInstance) {
       }
 
       const data = parsed.data;
-
       const ranchId = uuid();
 
-      // Ensure folder structure exists
       const ranchRoot = await ensureRanchStructure(ranchId);
 
-      // Optional file handling
       let logoUrl: string | null = null;
       let brandUrl: string | null = null;
 
@@ -87,7 +82,6 @@ export async function ranchRoutes(app: FastifyInstance) {
         }
       }
 
-      // Insert ranch
       await db.insert(ranches).values({
         id: ranchId,
         name: data.name,
@@ -109,15 +103,13 @@ export async function ranchRoutes(app: FastifyInstance) {
         brand_image_url: brandUrl,
       });
 
-      // Ensure membership exists (owner)
       await db.insert(userRanches).values({
         userId: req.auth!.userId,
         ranchId,
         role: "owner",
       });
 
-      // ✅ Create default Transfer herd (only on ranch creation)
-      // Avoid duplicates just in case the route is re-run.
+      // Default Transfer herd (full schema-friendly)
       const existingTransfer = await db
         .select({ id: herds.id })
         .from(herds)
@@ -129,14 +121,14 @@ export async function ranchRoutes(app: FastifyInstance) {
           id: uuid(),
           ranchId,
           name: "Transfer",
-          shortDescription: "System herd for incoming/outgoing animals",
+          shortDescription: "System-managed holding herd.",
+          longDescription:
+            "System-managed holding herd. Animals may be placed here temporarily for transfers.",
           species: null,
           breed: null,
           maleDesc: null,
           femaleDesc: null,
           babyDesc: null,
-          longDescription:
-            "System-managed holding herd. Animals may be placed here temporarily for transfers.",
         });
       }
 
@@ -149,6 +141,4 @@ export async function ranchRoutes(app: FastifyInstance) {
       });
     }
   });
-
-  // (Your PUT /ranches/:id etc can stay as-is; not changing it here.)
 }

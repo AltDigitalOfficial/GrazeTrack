@@ -6,12 +6,7 @@ import { Button } from "@/components/ui/button";
 import { apiGet, apiDelete } from "@/lib/api";
 import { ROUTES } from "@/routes";
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@radix-ui/react-dropdown-menu";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
 type ZoneListItem = {
   id: string;
@@ -33,8 +28,6 @@ export default function ListZonesPage() {
   const [loading, setLoading] = useState(true);
   const [zones, setZones] = useState<ZoneListItem[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const hasZones = zones.length > 0;
 
@@ -68,9 +61,7 @@ export default function ListZonesPage() {
 
     try {
       const res: { success: boolean } = await apiDelete(`/zones/${zone.id}`);
-      if (!res.success) {
-        throw new Error("Failed to delete zone");
-      }
+      if (!res.success) throw new Error("Failed to delete zone");
       await load();
     } catch (e: any) {
       alert(e?.message || "Failed to delete zone");
@@ -87,7 +78,8 @@ export default function ListZonesPage() {
         <div>
           <h1 className="text-3xl font-bold">Grazing Zones</h1>
           <p className="text-stone-600 text-sm">
-            Define and manage your pasture boundaries for grazing planning and tracking.
+            Define and manage your pasture boundaries for grazing planning and
+            tracking.
           </p>
         </div>
 
@@ -110,64 +102,82 @@ export default function ListZonesPage() {
           <div className="text-stone-600 mt-1">
             Define your first grazing zone to get started with land management.
           </div>
-          <Button className="mt-4" onClick={() => navigate(ROUTES.land.zonesCreate)}>
+          <Button
+            className="mt-4"
+            onClick={() => navigate(ROUTES.land.zonesCreate)}
+          >
             Create your first zone
           </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {sortedZones.map((zone) => {
-            const showNotes = hoveredId === zone.id && (zone.description?.trim()?.length ?? 0) > 0;
+            const hasDescription = (zone.description?.trim()?.length ?? 0) > 0;
 
             return (
               <div
                 key={zone.id}
-                className="relative rounded-xl border bg-white p-5 shadow-sm"
-                onMouseEnter={() => setHoveredId(zone.id)}
-                onMouseLeave={() => setHoveredId(null)}
+                className="relative group rounded-xl border bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
               >
-                {/* Header row */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="text-lg font-semibold truncate">{zone.name}</h3>
+                {/* Kebab menu */}
+                <div className="absolute top-3 right-3 z-30">
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-white hover:bg-stone-50"
+                        aria-label="Zone actions"
+                      >
+                        <EllipsisVertical className="h-4 w-4 text-stone-700" />
+                      </button>
+                    </DropdownMenu.Trigger>
+
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content
+                        align="end"
+                        sideOffset={8}
+                        // Key changes: explicit text color + high z-index + consistent padding/border/bg/shadow
+                        className="z-9999 min-w-36 rounded-md border bg-white p-1 text-sm text-stone-900 shadow-md"
+                      >
+                        <DropdownMenu.Item
+                          onSelect={() => onEdit(zone.id)}
+                          // Key changes: use Radix highlighted state (not only :hover)
+                          className="cursor-pointer select-none rounded px-3 py-2 outline-none text-stone-900 data-highlighted:bg-stone-100 data-highlighted:text-stone-900"
+                        >
+                          Edit
+                        </DropdownMenu.Item>
+
+                        <DropdownMenu.Item
+                          onSelect={() => onDelete(zone)}
+                          className="cursor-pointer select-none rounded px-3 py-2 outline-none text-red-700 data-highlighted:bg-stone-100 data-highlighted:text-red-700"
+                        >
+                          Delete
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
+                </div>
+
+                {/* Card content */}
+                <div className="space-y-3 pr-12">
+                  <div>
+                    <h3 className="text-lg font-semibold truncate">
+                      {zone.name}
+                    </h3>
                     <div className="text-sm text-stone-600 mt-1">
                       {formatArea(zone.areaAcres)}
                     </div>
                   </div>
 
-                  {/* Ellipsis menu */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-white hover:bg-stone-50"
-                        aria-label="Zone actions"
-                      >
-                        <EllipsisVertical className="h-4 w-4" />
-                      </button>
-                    </DropdownMenuTrigger>
-
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => onEdit(zone.id)}>
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => onDelete(zone)}>
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                {/* Details */}
-                <div className="mt-4 text-sm">
-                  <div className="text-stone-700">
+                  <div className="text-sm text-stone-700">
                     <span className="font-medium">Created:</span>{" "}
                     {new Date(zone.createdAt).toLocaleDateString()}
                   </div>
                 </div>
 
-                {/* Hover notes overlay */}
-                {showNotes && (
-                  <div className="absolute inset-0 rounded-xl bg-white/95 p-5 pointer-events-none">
+                {/* Hover description overlay */}
+                {hasDescription && (
+                  <div className="pointer-events-none absolute inset-0 rounded-xl bg-white/95 backdrop-blur-sm p-5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                     <div className="pr-12 pointer-events-auto">
                       <div className="text-sm font-semibold">Description</div>
                       <div className="text-sm text-stone-700 mt-2 whitespace-pre-wrap">

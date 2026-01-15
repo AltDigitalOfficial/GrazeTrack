@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, primaryKey, decimal } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, primaryKey, decimal, customType } from "drizzle-orm/pg-core";
 
 /**
  * Ranches
@@ -39,15 +39,14 @@ export const users = pgTable("users", {
 });
 
 /**
- * User ↔ Ranch membership with role
- * role: "owner" | "admin" | "staff"
+ * User ↔ Ranch membership
  */
 export const userRanches = pgTable(
   "user_ranches",
   {
     userId: text("user_id").notNull(),
     ranchId: text("ranch_id").notNull(),
-    role: text("role").notNull(),
+    role: text("role").default("admin"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
@@ -56,7 +55,7 @@ export const userRanches = pgTable(
 );
 
 /**
- * Herds
+ * Herds (full schema)
  */
 export const herds = pgTable("herds", {
   id: text("id").primaryKey(),
@@ -64,6 +63,7 @@ export const herds = pgTable("herds", {
 
   name: text("name").notNull(),
   shortDescription: text("short_description"),
+
   species: text("species"),
   breed: text("breed"),
 
@@ -77,8 +77,25 @@ export const herds = pgTable("herds", {
 });
 
 /**
- * Zones (pastures/grazing areas)
+ * Animals
  */
+export const animals = pgTable("animals", {
+  id: text("id").primaryKey(),
+  ranchId: text("ranch_id").notNull(),
+  tag: text("tag"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * Zones (pastures/grazing areas) - PostGIS geometry
+ */
+const geometry = customType<{ data: any; driverData: any }>({
+  dataType() {
+    return "geometry";
+  },
+});
+
 export const zones = pgTable("zones", {
   id: text("id").primaryKey(),
   ranchId: text("ranch_id").notNull(),
@@ -87,7 +104,7 @@ export const zones = pgTable("zones", {
   description: text("description"),
 
   areaAcres: decimal("area_acres"),
-  geom: text("geom"), // PostGIS geometry as WKT or GeoJSON
+  geom: geometry("geom"),
 
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });

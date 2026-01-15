@@ -20,7 +20,7 @@ export function Shell() {
           </main>
 
           {/* Footer - spans full width */}
-          <footer className="bg-stone-700 text-stone-100 p-4 text-center text-sm flex-shrink-0 relative z-10">
+          <footer className="bg-stone-700 text-stone-100 p-4 text-center text-sm shrink-0 relative z-10">
             GrazeTrack © 2025
           </footer>
         </div>

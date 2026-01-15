@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import "leaflet-geometryutil";
-import { MapPin, Save, X } from "lucide-react";
+import { MapPin } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,36 +12,137 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiGet, apiPut } from "@/lib/api";
 import { ROUTES } from "@/routes";
 
-// Fix for default markers in Leaflet
+// Fix Leaflet default marker paths
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
-  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+  iconRetinaUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+  iconUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+  shadowUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
+
+type GeoJsonPolygon = {
+  type: "Polygon";
+  coordinates: number[][][]; // [ [ [lng, lat], ... ] ]
+};
 
 type ZoneData = {
   id: string;
+  ranchId: string;
   name: string;
   description: string | null;
-  areaAcres: string;
-  geom: any; // GeoJSON geometry
+  areaAcres: string | number | null;
+  geom: string | null; // GeoJSON string
 };
 
 type ZoneFormData = {
   name: string;
   description: string;
-  geom: any; // GeoJSON geometry
+  geom: string | null;
   areaAcres: number;
 };
+
+function safeParseGeoJSON(input: string): GeoJsonPolygon | null {
+  try {
+    const obj = JSON.parse(input);
+    if (obj?.type === "Polygon" && Array.isArray(obj.coordinates)) return obj as GeoJsonPolygon;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function geoJsonToLatLngs(geom: GeoJsonPolygon): L.LatLng[] {
+  const ring0 = geom.coordinates?.[0] ?? [];
+  const pts = ring0.map((c) => L.latLng(c[1], c[0]));
+
+  // Drop duplicated closing point if present
+  if (pts.length >= 2) {
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    if (a.lat === b.lat && a.lng === b.lng) return pts.slice(0, -1);
+  }
+  return pts;
+}
+
+function latLngsToGeoJson(points: L.LatLng[]): GeoJsonPolygon {
+  const coords = points.map((p) => [p.lng, p.lat]);
+  if (coords.length > 0) {
+    const first = coords[0];
+    const last = coords[coords.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) coords.push(first);
+  }
+  return { type: "Polygon", coordinates: [coords] };
+}
+
+function computeAreaAcres(points: L.LatLng[]): number {
+  if (points.length < 3) return 0;
+
+  const earthRadius = 6371000; // meters
+  const pts = points.map((p) => ({
+    x: earthRadius * Math.cos((p.lat * Math.PI) / 180) * ((p.lng * Math.PI) / 180),
+    y: earthRadius * ((p.lat * Math.PI) / 180),
+  }));
+
+  let areaSqMeters = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length;
+    areaSqMeters += pts[i].x * pts[j].y;
+    areaSqMeters -= pts[j].x * pts[i].y;
+  }
+  areaSqMeters = Math.abs(areaSqMeters) / 2;
+
+  return areaSqMeters / 4046.86;
+}
+
+/**
+ * Robust cursor setter (Leaflet sometimes stomps inline cursor changes)
+ */
+function setLeafletCursor(map: L.Map | null, cursor: string | null) {
+  if (!map) return;
+  const container = map.getContainer();
+  if (cursor) {
+    container.style.cursor = cursor;
+    container.classList.add("gt-force-cursor");
+  } else {
+    container.style.cursor = "";
+    container.classList.remove("gt-force-cursor");
+  }
+
+  // Also apply to common child panes that Leaflet may use
+  const panes = container.querySelectorAll<HTMLElement>(
+    ".leaflet-pane, .leaflet-map-pane, .leaflet-overlay-pane, .leaflet-marker-pane, .leaflet-tile-pane"
+  );
+  panes.forEach((el) => {
+    el.style.cursor = cursor ?? "";
+  });
+}
 
 export default function EditZonePage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const mapRef = useRef<HTMLDivElement>(null);
-  const leafletMapRef = useRef<L.Map | null>(null);
+
+  const mapElRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+
+  // Single polygon layer shown on map (whatever we’re currently showing)
+  const polygonRef = useRef<L.Polygon | null>(null);
+
+  // Drawing mode state + ref (so Leaflet click handler never has stale closure)
+  const isDrawingRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [points, setPoints] = useState<L.LatLng[]>([]);
+
+  // purely a “did the new file load?” indicator
+  const [pageBuildTag] = useState("EDIT_ZONE_BUILD_2026_01_14_C");
+
   const [formData, setFormData] = useState<ZoneFormData>({
     name: "",
     description: "",
@@ -49,161 +150,213 @@ export default function EditZonePage() {
     areaAcres: 0,
   });
 
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [currentPolygon, setCurrentPolygon] = useState<L.Polygon | null>(null);
-  const [polygonPoints, setPolygonPoints] = useState<L.LatLng[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const canSave = useMemo(() => {
+    return Boolean(formData.name.trim()) && Boolean(formData.geom) && !saving && !loading;
+  }, [formData.name, formData.geom, saving, loading]);
 
-  // Load zone data
+  const removePolygonFromMapOnly = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (polygonRef.current) {
+      map.removeLayer(polygonRef.current);
+      polygonRef.current = null;
+    }
+  }, []);
+
+  const drawPolygon = useCallback(
+    (polyPoints: L.LatLng[], zoom: boolean) => {
+      const map = mapRef.current;
+      if (!map) return;
+
+      removePolygonFromMapOnly();
+
+      if (polyPoints.length < 3) return;
+
+      const poly = L.polygon(polyPoints, {
+        color: "#22c55e",
+        weight: 2,
+        fillColor: "#22c55e",
+        fillOpacity: 0.2,
+      }).addTo(map);
+
+      polygonRef.current = poly;
+
+      if (zoom) {
+        const bounds = poly.getBounds();
+        if (bounds?.isValid()) {
+          map.whenReady(() => {
+            requestAnimationFrame(() => {
+              map.invalidateSize();
+              map.fitBounds(bounds, { padding: [24, 24] });
+            });
+          });
+        }
+      }
+    },
+    [removePolygonFromMapOnly]
+  );
+
+  const handleMapClick = useCallback(
+    (e: L.LeafletMouseEvent) => {
+      if (!isDrawingRef.current) return;
+
+      setPoints((prev) => {
+        const next = [...prev, e.latlng];
+
+        if (next.length >= 3) {
+          drawPolygon(next, false);
+
+          const geo = latLngsToGeoJson(next);
+          const acres = computeAreaAcres(next);
+
+          setFormData((fd) => ({
+            ...fd,
+            geom: JSON.stringify(geo),
+            areaAcres: Math.round(acres * 100) / 100,
+          }));
+        }
+
+        return next;
+      });
+    },
+    [drawPolygon]
+  );
+
+  // Init map once
   useEffect(() => {
-    const loadZone = async () => {
+    if (!mapElRef.current) return;
+    if (mapRef.current) return;
+
+    const map = L.map(mapElRef.current).setView([39.8283, -98.5795], 5);
+    mapRef.current = map;
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution:
+        '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      polygonRef.current = null;
+    };
+  }, []);
+
+  // Bind click handler
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    map.off("click", handleMapClick);
+    map.on("click", handleMapClick);
+
+    return () => {
+      map.off("click", handleMapClick);
+    };
+  }, [handleMapClick]);
+
+  // Sync drawing state to ref + cursor
+  useEffect(() => {
+    isDrawingRef.current = isDrawing;
+    setLeafletCursor(mapRef.current, isDrawing ? "crosshair" : null);
+  }, [isDrawing]);
+
+  // Load zone + draw polygon + zoom
+  useEffect(() => {
+    const load = async () => {
       if (!id) return;
+
+      setLoading(true);
+      setErrorMsg(null);
 
       try {
         const zone: ZoneData = await apiGet(`/zones/${id}`);
+
+        const parsedGeom = zone.geom ? safeParseGeoJSON(zone.geom) : null;
+
         setFormData({
-          name: zone.name,
-          description: zone.description || "",
-          geom: zone.geom,
-          areaAcres: parseFloat(zone.areaAcres) || 0,
+          name: zone.name ?? "",
+          description: zone.description ?? "",
+          geom: zone.geom ?? null,
+          areaAcres:
+            typeof zone.areaAcres === "number"
+              ? zone.areaAcres
+              : zone.areaAcres
+                ? parseFloat(String(zone.areaAcres))
+                : 0,
         });
-      } catch (e: any) {
-        setErrorMsg(e?.message || "Failed to load zone");
+
+        if (parsedGeom) {
+          const polyPoints = geoJsonToLatLngs(parsedGeom);
+          setPoints(polyPoints);
+          drawPolygon(polyPoints, true);
+        } else {
+          setPoints([]);
+          removePolygonFromMapOnly();
+        }
+      } catch (err: any) {
+        setErrorMsg(err?.message || "Failed to load zone");
       } finally {
         setLoading(false);
       }
     };
 
-    void loadZone();
-  }, [id]);
+    void load();
+  }, [id, drawPolygon, removePolygonFromMapOnly]);
 
-  // Initialize map
-  useEffect(() => {
-    if (!mapRef.current || leafletMapRef.current || loading) return;
+  /**
+   * NEW: “Hide Boundary” — removes polygon from the MAP only.
+   * Does NOT modify the DB until the user clicks Update Zone.
+   */
+  const hideBoundary = () => {
+    setErrorMsg(null);
 
-    const map = L.map(mapRef.current).setView([39.8283, -98.5795], 5); // Center of US
-    leafletMapRef.current = map;
+    // remove visual polygon only
+    removePolygonFromMapOnly();
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
+    // clear in-memory boundary so "Update Zone" would persist removal
+    setPoints([]);
+    setFormData((fd) => ({ ...fd, geom: null, areaAcres: 0 }));
 
-    // Load existing zone geometry if available
-    if (formData.geom) {
-      try {
-        const geoJson = JSON.parse(formData.geom);
-        const polygon = L.polygon(geoJson.coordinates[0].map((coord: number[]) => [coord[1], coord[0]]), {
-          color: '#22c55e',
-          fillColor: '#22c55e',
-          fillOpacity: 0.2,
-          weight: 2
-        }).addTo(map);
-        setCurrentPolygon(polygon);
-
-        // Fit map to the zone bounds
-        const bounds = polygon.getBounds();
-        if (bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [20, 20] });
-        }
-      } catch (e) {
-        console.error('Failed to parse existing geometry:', e);
-      }
-    }
-
-    // Handle map clicks for drawing
-    const handleMapClick = (e: L.LeafletMouseEvent) => {
-      if (!isDrawing) return;
-
-      const newPoints = [...polygonPoints, e.latlng];
-      setPolygonPoints(newPoints);
-
-      // Remove previous polygon
-      if (currentPolygon) {
-        map.removeLayer(currentPolygon);
-      }
-
-      // Create new polygon
-      if (newPoints.length >= 3) {
-        const polygon = L.polygon(newPoints, {
-          color: '#22c55e',
-          fillColor: '#22c55e',
-          fillOpacity: 0.2,
-          weight: 2
-        }).addTo(map);
-        setCurrentPolygon(polygon);
-
-        // Calculate area
-        updateZoneFromPoints(newPoints);
-      }
-    };
-
-    map.on('click', handleMapClick);
-
-    return () => {
-      map.off('click', handleMapClick);
-      map.remove();
-      leafletMapRef.current = null;
-    };
-  }, [loading, formData.geom, isDrawing, polygonPoints]);
-
-  const updateZoneFromPoints = (points: L.LatLng[]) => {
-    if (points.length < 3) return;
-
-    // Convert to GeoJSON
-    const geoJson = {
-      type: 'Polygon',
-      coordinates: [points.map(p => [p.lng, p.lat])]
-    };
-
-    // Calculate area in square meters using leaflet-geometryutil
-    const areaSqMeters = (L.GeometryUtil as any).geodesicArea(points);
-
-    // Convert to acres (1 acre = 4046.86 square meters)
-    const areaAcres = areaSqMeters / 4046.86;
-
-    setFormData(prev => ({
-      ...prev,
-      geom: JSON.stringify(geoJson),
-      areaAcres: Math.round(areaAcres * 100) / 100, // Round to 2 decimal places
-    }));
-  };
-
-  const startDrawing = () => {
-    setIsDrawing(true);
-    setPolygonPoints([]);
-    if (currentPolygon && leafletMapRef.current) {
-      leafletMapRef.current.removeLayer(currentPolygon);
-    }
-    setCurrentPolygon(null);
-    setFormData(prev => ({ ...prev, geom: null, areaAcres: 0 }));
-  };
-
-  const finishDrawing = () => {
+    // optional: do NOT auto-enter drawing mode
     setIsDrawing(false);
   };
+
+  /**
+   * NEW: Start drawing a replacement boundary.
+   * We ALSO hide the existing boundary immediately (map-only).
+   */
+  const startDrawing = () => {
+    setErrorMsg(null);
+
+    removePolygonFromMapOnly();
+    setPoints([]);
+    setFormData((fd) => ({ ...fd, geom: null, areaAcres: 0 }));
+
+    setIsDrawing(true);
+    isDrawingRef.current = true;
+  };
+
+  const finishDrawing = () => setIsDrawing(false);
 
   const clearDrawing = () => {
     setIsDrawing(false);
-    setPolygonPoints([]);
-    if (currentPolygon && leafletMapRef.current) {
-      leafletMapRef.current.removeLayer(currentPolygon);
-    }
-    setCurrentPolygon(null);
-    setFormData(prev => ({ ...prev, geom: null, areaAcres: 0 }));
+    setPoints([]);
+    setFormData((fd) => ({ ...fd, geom: null, areaAcres: 0 }));
+    removePolygonFromMapOnly();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!id) return;
+
     if (!formData.name.trim()) {
       setErrorMsg("Zone name is required");
       return;
     }
-
     if (!formData.geom) {
-      setErrorMsg("Please draw a zone boundary on the map");
+      setErrorMsg("No boundary is defined. Draw a boundary, or hit Back to discard changes.");
       return;
     }
 
@@ -215,24 +368,19 @@ export default function EditZonePage() {
         name: formData.name.trim(),
         description: formData.description.trim() || null,
         geom: formData.geom,
-        areaAcres: formData.areaAcres.toString(),
+        areaAcres: formData.areaAcres,
       };
 
-      const result: { success: boolean } = await apiPut(`/zones/${id}`, payload);
+      const res: { success: boolean } = await apiPut(`/zones/${id}`, payload);
+      if (!res?.success) throw new Error("Update zone failed");
 
-      if (result.success) {
-        navigate(ROUTES.land.zonesList);
-      } else {
-        throw new Error("Failed to update zone");
-      }
-    } catch (e: any) {
-      setErrorMsg(e?.message || "Failed to update zone");
+      navigate(ROUTES.land.zonesList);
+    } catch (err: any) {
+      setErrorMsg(err?.message || "Failed to update zone");
     } finally {
       setSaving(false);
     }
   };
-
-  const canSave = formData.name.trim() && formData.geom && !saving && !loading;
 
   if (loading) {
     return (
@@ -244,17 +392,20 @@ export default function EditZonePage() {
 
   return (
     <div className="max-w-6xl mx-auto py-10 space-y-6">
+      {/* Helps prevent Leaflet from overriding cursor */}
+      <style>{`
+        .gt-force-cursor { cursor: crosshair !important; }
+      `}</style>
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Edit Grazing Zone</h1>
           <p className="text-stone-600 text-sm">
-            Update the zone boundary and details.
+            Build tag: <span className="font-mono">{pageBuildTag}</span>
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => navigate(ROUTES.land.zonesList)}
-        >
+
+        <Button variant="outline" onClick={() => navigate(ROUTES.land.zonesList)}>
           Back
         </Button>
       </div>
@@ -265,15 +416,20 @@ export default function EditZonePage() {
         </div>
       )}
 
+      {isDrawing && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
+          Drawing mode enabled — click 3+ points to create a boundary.
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Form fields */}
         <div className="space-y-4">
           <div>
             <Label htmlFor="name">Zone Name *</Label>
             <Input
               id="name"
               value={formData.name}
-              onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => setFormData((fd) => ({ ...fd, name: e.target.value }))}
               placeholder="Enter zone name"
               required
             />
@@ -284,8 +440,8 @@ export default function EditZonePage() {
             <Textarea
               id="description"
               value={formData.description}
-              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-              placeholder="Optional description of the zone"
+              onChange={(e) => setFormData((fd) => ({ ...fd, description: e.target.value }))}
+              placeholder="Optional notes"
               rows={3}
             />
           </div>
@@ -300,51 +456,42 @@ export default function EditZonePage() {
           )}
         </div>
 
-        {/* Map */}
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Label>Zone Boundary</Label>
-            <div className="flex gap-2">
-              {!isDrawing ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={startDrawing}
-                >
-                  Redraw Zone
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="mr-2">Zone Boundary</Label>
+
+            {/* NEW: hide existing polygon without touching DB */}
+            <Button type="button" variant="outline" size="sm" onClick={hideBoundary}>
+              Hide Boundary
+            </Button>
+
+            {!isDrawing ? (
+              <Button type="button" variant="default" size="sm" onClick={startDrawing}>
+                Draw New Boundary
+              </Button>
+            ) : (
+              <>
+                <Button type="button" variant="default" size="sm" onClick={finishDrawing}>
+                  Finish Drawing
                 </Button>
-              ) : (
-                <>
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="sm"
-                    onClick={finishDrawing}
-                  >
-                    Finish Drawing
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                      onClick={clearDrawing}
-                    >
-                      Clear
-                    </Button>
-                  </>
-                )}
-              </div>
-            </div>
-            <div className="rounded-lg border overflow-hidden">
-              <div ref={mapRef} className="h-96 w-full" />
-            </div>
-            <p className="text-xs text-stone-600">
-              {isDrawing
-                ? `Click on the map to add points. Click "Finish Drawing" when done. Current points: ${polygonPoints.length}`
-                : "The existing zone boundary is shown. Click 'Redraw Zone' to create a new boundary."
-              }
-            </p>
+                <Button type="button" variant="outline" size="sm" onClick={clearDrawing}>
+                  Clear Drawing
+                </Button>
+              </>
+            )}
+          </div>
+
+          <div className="rounded-lg border overflow-hidden">
+            <div ref={mapElRef} className="h-96 w-full" />
+          </div>
+
+          <p className="text-xs text-stone-600">
+            {isDrawing
+              ? `Click to add points. Current points: ${points.length} (polygon appears at 3+)`
+              : formData.geom
+                ? "Boundary is currently set in memory."
+                : "No boundary is currently set (in memory). Hit Back to discard, or draw a new one."}
+          </p>
         </div>
 
         <Button type="submit" className="w-full" disabled={!canSave}>

@@ -54,7 +54,7 @@ export function Sidebar() {
   return (
     <aside className="w-64 text-stone-100 relative h-full flex flex-col">
       {/* Header */}
-      <div className="p-4 border-b border-stone-600 flex-shrink-0">
+      <div className="p-4 border-b border-stone-600 shrink-0">
         <h2 className="text-lg font-bold text-amber-400">GrazeTrack</h2>
         <div className="text-sm text-stone-300 mt-1 truncate">{ranchName}</div>
       </div>
