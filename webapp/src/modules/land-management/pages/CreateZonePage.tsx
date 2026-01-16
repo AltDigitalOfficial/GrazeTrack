@@ -184,7 +184,7 @@ export default function CreateZonePage() {
     };
   }, [handleMapClick]);
 
-  // Drawing state -> ref + cursor class
+  // CRITICAL: Manage drawing state, cursor, AND disable map interactions
   useEffect(() => {
     isDrawingRef.current = isDrawing;
 
@@ -192,7 +192,30 @@ export default function CreateZonePage() {
     if (!map) return;
 
     const container = map.getContainer();
-    container.classList.toggle("leaflet-crosshair", isDrawing);
+    
+    if (isDrawing) {
+      // Set crosshair cursor
+      container.classList.add("leaflet-crosshair");
+      
+      // DISABLE all map interactions
+      map.dragging.disable();
+      map.touchZoom.disable();
+      map.doubleClickZoom.disable();
+      map.scrollWheelZoom.disable();
+      map.boxZoom.disable();
+      map.keyboard.disable();
+    } else {
+      // Restore normal cursor
+      container.classList.remove("leaflet-crosshair");
+      
+      // RE-ENABLE map interactions
+      map.dragging.enable();
+      map.touchZoom.enable();
+      map.doubleClickZoom.enable();
+      map.scrollWheelZoom.enable();
+      map.boxZoom.enable();
+      map.keyboard.enable();
+    }
   }, [isDrawing]);
 
   const startDrawing = () => {
@@ -248,9 +271,12 @@ export default function CreateZonePage() {
 
   return (
     <div className="max-w-6xl mx-auto py-10 space-y-6">
-      {/* Cursor style that Leaflet won't override */}
+      {/* Cursor style for crosshair mode */}
       <style>{`
-        .leaflet-crosshair { cursor: crosshair !important; }
+        .leaflet-crosshair,
+        .leaflet-crosshair * { 
+          cursor: crosshair !important; 
+        }
       `}</style>
 
       <div className="flex items-center justify-between">
@@ -267,6 +293,12 @@ export default function CreateZonePage() {
       {errorMsg && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800 text-sm">
           {errorMsg}
+        </div>
+      )}
+
+      {isDrawing && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-blue-800 text-sm">
+          <strong>Drawing Mode:</strong> Click on the map to add points. Map navigation is disabled.
         </div>
       )}
 
@@ -334,7 +366,7 @@ export default function CreateZonePage() {
               ? `Click to add points. Current points: ${points.length} (polygon appears at 3+)`
               : formData.geom
                 ? "Boundary captured. You can save now."
-                : "Click “Draw Zone” to start."}
+                : "Click 'Draw Zone' to start."}
           </p>
         </div>
 

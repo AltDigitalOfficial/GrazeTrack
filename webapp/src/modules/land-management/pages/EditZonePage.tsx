@@ -97,29 +97,6 @@ function computeAreaAcres(points: L.LatLng[]): number {
   return areaSqMeters / 4046.86;
 }
 
-/**
- * Robust cursor setter (Leaflet sometimes stomps inline cursor changes)
- */
-function setLeafletCursor(map: L.Map | null, cursor: string | null) {
-  if (!map) return;
-  const container = map.getContainer();
-  if (cursor) {
-    container.style.cursor = cursor;
-    container.classList.add("gt-force-cursor");
-  } else {
-    container.style.cursor = "";
-    container.classList.remove("gt-force-cursor");
-  }
-
-  // Also apply to common child panes that Leaflet may use
-  const panes = container.querySelectorAll<HTMLElement>(
-    ".leaflet-pane, .leaflet-map-pane, .leaflet-overlay-pane, .leaflet-marker-pane, .leaflet-tile-pane"
-  );
-  panes.forEach((el) => {
-    el.style.cursor = cursor ?? "";
-  });
-}
-
 export default function EditZonePage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -127,7 +104,7 @@ export default function EditZonePage() {
   const mapElRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
 
-  // Single polygon layer shown on map (whatever we’re currently showing)
+  // Single polygon layer shown on map
   const polygonRef = useRef<L.Polygon | null>(null);
 
   // Drawing mode state + ref (so Leaflet click handler never has stale closure)
@@ -139,9 +116,6 @@ export default function EditZonePage() {
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [points, setPoints] = useState<L.LatLng[]>([]);
-
-  // purely a “did the new file load?” indicator
-  const [pageBuildTag] = useState("EDIT_ZONE_BUILD_2026_01_14_C");
 
   const [formData, setFormData] = useState<ZoneFormData>({
     name: "",
@@ -256,10 +230,38 @@ export default function EditZonePage() {
     };
   }, [handleMapClick]);
 
-  // Sync drawing state to ref + cursor
+  // CRITICAL: Manage drawing state, cursor, AND disable map interactions
   useEffect(() => {
     isDrawingRef.current = isDrawing;
-    setLeafletCursor(mapRef.current, isDrawing ? "crosshair" : null);
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    const container = map.getContainer();
+    
+    if (isDrawing) {
+      // Set crosshair cursor
+      container.classList.add("leaflet-crosshair");
+      
+      // DISABLE all map interactions
+      map.dragging.disable();
+      map.touchZoom.disable();
+      map.doubleClickZoom.disable();
+      map.scrollWheelZoom.disable();
+      map.boxZoom.disable();
+      map.keyboard.disable();
+    } else {
+      // Restore normal cursor
+      container.classList.remove("leaflet-crosshair");
+      
+      // RE-ENABLE map interactions
+      map.dragging.enable();
+      map.touchZoom.enable();
+      map.doubleClickZoom.enable();
+      map.scrollWheelZoom.enable();
+      map.boxZoom.enable();
+      map.keyboard.enable();
+    }
   }, [isDrawing]);
 
   // Load zone + draw polygon + zoom
@@ -306,7 +308,7 @@ export default function EditZonePage() {
   }, [id, drawPolygon, removePolygonFromMapOnly]);
 
   /**
-   * NEW: “Hide Boundary” — removes polygon from the MAP only.
+   * "Hide Boundary" – removes polygon from the MAP only.
    * Does NOT modify the DB until the user clicks Update Zone.
    */
   const hideBoundary = () => {
@@ -319,12 +321,12 @@ export default function EditZonePage() {
     setPoints([]);
     setFormData((fd) => ({ ...fd, geom: null, areaAcres: 0 }));
 
-    // optional: do NOT auto-enter drawing mode
+    // do NOT auto-enter drawing mode
     setIsDrawing(false);
   };
 
   /**
-   * NEW: Start drawing a replacement boundary.
+   * Start drawing a replacement boundary.
    * We ALSO hide the existing boundary immediately (map-only).
    */
   const startDrawing = () => {
@@ -335,7 +337,6 @@ export default function EditZonePage() {
     setFormData((fd) => ({ ...fd, geom: null, areaAcres: 0 }));
 
     setIsDrawing(true);
-    isDrawingRef.current = true;
   };
 
   const finishDrawing = () => setIsDrawing(false);
@@ -392,17 +393,18 @@ export default function EditZonePage() {
 
   return (
     <div className="max-w-6xl mx-auto py-10 space-y-6">
-      {/* Helps prevent Leaflet from overriding cursor */}
+      {/* Cursor style for crosshair mode */}
       <style>{`
-        .gt-force-cursor { cursor: crosshair !important; }
+        .leaflet-crosshair,
+        .leaflet-crosshair * { 
+          cursor: crosshair !important; 
+        }
       `}</style>
 
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Edit Grazing Zone</h1>
-          <p className="text-stone-600 text-sm">
-            Build tag: <span className="font-mono">{pageBuildTag}</span>
-          </p>
+          <p className="text-stone-600 text-sm">Modify zone details or redraw boundary.</p>
         </div>
 
         <Button variant="outline" onClick={() => navigate(ROUTES.land.zonesList)}>
@@ -417,8 +419,8 @@ export default function EditZonePage() {
       )}
 
       {isDrawing && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
-          Drawing mode enabled — click 3+ points to create a boundary.
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-blue-800 text-sm">
+          <strong>Drawing Mode:</strong> Click on the map to add points. Map navigation is disabled.
         </div>
       )}
 
@@ -460,10 +462,12 @@ export default function EditZonePage() {
           <div className="flex flex-wrap items-center gap-2">
             <Label className="mr-2">Zone Boundary</Label>
 
-            {/* NEW: hide existing polygon without touching DB */}
-            <Button type="button" variant="outline" size="sm" onClick={hideBoundary}>
-              Hide Boundary
-            </Button>
+            {/* Hide existing polygon without touching DB */}
+            {formData.geom && !isDrawing && (
+              <Button type="button" variant="outline" size="sm" onClick={hideBoundary}>
+                Hide Boundary
+              </Button>
+            )}
 
             {!isDrawing ? (
               <Button type="button" variant="default" size="sm" onClick={startDrawing}>
@@ -489,8 +493,8 @@ export default function EditZonePage() {
             {isDrawing
               ? `Click to add points. Current points: ${points.length} (polygon appears at 3+)`
               : formData.geom
-                ? "Boundary is currently set in memory."
-                : "No boundary is currently set (in memory). Hit Back to discard, or draw a new one."}
+                ? "Boundary is currently set in memory. Click 'Update Zone' to save changes."
+                : "No boundary is currently set. Draw a new one or hit Back to discard changes."}
           </p>
         </div>
 

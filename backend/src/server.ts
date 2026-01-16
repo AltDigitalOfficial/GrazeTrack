@@ -8,6 +8,8 @@ import { ranchRoutes } from "./routes/ranches";
 import { meRoutes } from "./routes/me";
 import { herdRoutes } from "./routes/herds";
 import { zonesRoutes } from "./routes/zones";
+import { medicationsRoutes } from "./routes/medications";
+import { medicationPurchasesRoutes } from "./routes/medicationPurchases";
 
 async function start() {
   const app = Fastify({
@@ -40,6 +42,8 @@ async function start() {
   app.register(ranchRoutes, { prefix: "/api" });
   app.register(herdRoutes, { prefix: "/api" });
   app.register(zonesRoutes, { prefix: "/api" });
+  app.register(medicationsRoutes, { prefix: "/api" });
+  app.register(medicationPurchasesRoutes, { prefix: "/api" });
 
   try {
     await app.listen({ port: 3001, host: "0.0.0.0" });
