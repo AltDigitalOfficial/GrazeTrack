@@ -2,17 +2,16 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, eq, isNull, sql, desc } from "drizzle-orm";
-import { standardMedications, ranchMedicationStandards, medicationPurchases } from "../db/schema";
+import {
+  standardMedications,
+  ranchMedicationStandards,
+  medicationPurchases,
+} from "../db/schema";
 
 // Adjust this import to your actual DB export location:
 import { db } from "../db";
 
-function normalizeName(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
 function todayIsoDate(): string {
-  // date-only ISO in server local time is fine for v1; can revisit with TZ rules later.
   const d = new Date();
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -43,12 +42,11 @@ const CreateStandardMedicationBody = z.object({
   concentrationValue: z.union([z.string(), z.number()]).optional().nullable(),
   concentrationUnit: z.string().optional().nullable(),
 
-  manufacturerName: z.string().min(1), // allow "Generic"
-  brandName: z.string().min(1), // allow "Generic"
+  manufacturerName: z.string().min(1),
+  brandName: z.string().min(1),
 
   onLabelDoseText: z.string().optional().nullable(),
 
-  // Create the initial active ranch standard at the same time
   standard: z.object({
     usesOffLabel: z.boolean(),
     standardDoseText: z.string().min(1),
@@ -83,6 +81,10 @@ const RetireStandardBody = z.object({
 export async function medicationsRoutes(app: FastifyInstance) {
   /**
    * Create a Standard Medication + initial active Ranch Standard
+   *
+   * IMPORTANT:
+   * server.ts registers this routes file with prefix "/api"
+   * so this path becomes POST /api/standard-medications
    */
   app.post("/standard-medications", async (req, reply) => {
     const body = CreateStandardMedicationBody.parse(req.body);
@@ -122,45 +124,47 @@ export async function medicationsRoutes(app: FastifyInstance) {
       });
     });
 
-    const med = {
-      id: medicationId,
-      ranchId: body.ranchId,
-      chemicalName: body.chemicalName,
-      format: body.format,
-      concentrationValue:
-        body.concentrationValue === null || body.concentrationValue === undefined
-          ? null
-          : String(body.concentrationValue),
-      concentrationUnit: body.concentrationUnit ?? null,
-      manufacturerName: body.manufacturerName,
-      brandName: body.brandName,
-      onLabelDoseText: body.onLabelDoseText ?? null,
-      displayName: buildDisplayName({
+    return reply.send({
+      medication: {
+        id: medicationId,
+        ranchId: body.ranchId,
         chemicalName: body.chemicalName,
-        brandName: body.brandName,
-        manufacturerName: body.manufacturerName,
         format: body.format,
         concentrationValue:
           body.concentrationValue === null || body.concentrationValue === undefined
             ? null
             : String(body.concentrationValue),
         concentrationUnit: body.concentrationUnit ?? null,
-      }),
-      currentStandard: {
-        id: standardId,
-        usesOffLabel: body.standard.usesOffLabel,
-        standardDoseText: body.standard.standardDoseText,
-        startDate,
-        endDate: null,
+        manufacturerName: body.manufacturerName,
+        brandName: body.brandName,
+        onLabelDoseText: body.onLabelDoseText ?? null,
+        displayName: buildDisplayName({
+          chemicalName: body.chemicalName,
+          brandName: body.brandName,
+          manufacturerName: body.manufacturerName,
+          format: body.format,
+          concentrationValue:
+            body.concentrationValue === null || body.concentrationValue === undefined
+              ? null
+              : String(body.concentrationValue),
+          concentrationUnit: body.concentrationUnit ?? null,
+        }),
+        currentStandard: {
+          id: standardId,
+          usesOffLabel: body.standard.usesOffLabel,
+          standardDoseText: body.standard.standardDoseText,
+          startDate,
+          endDate: null,
+        },
       },
-    };
-
-    return reply.send({ medication: med });
+    });
   });
 
   /**
    * Dropdown source for "Record Purchase":
    * only Standard Medications that have an ACTIVE standard (endDate is null)
+   *
+   * GET /api/standard-medications/active?ranchId=...
    */
   app.get("/standard-medications/active", async (req, reply) => {
     const q = ListActiveDropdownQuery.parse(req.query);
@@ -189,44 +193,44 @@ export async function medicationsRoutes(app: FastifyInstance) {
         and(
           eq(ranchMedicationStandards.standardMedicationId, standardMedications.id),
           eq(ranchMedicationStandards.ranchId, q.ranchId),
-          isNull(ranchMedicationStandards.endDate),
-        ),
+          isNull(ranchMedicationStandards.endDate)
+        )
       )
       .where(eq(standardMedications.ranchId, q.ranchId))
       .orderBy(standardMedications.chemicalName, standardMedications.brandName);
 
-    const meds = rows.map((r) => ({
-      id: r.medicationId,
-      chemicalName: r.chemicalName,
-      format: r.format,
-      concentrationValue: r.concentrationValue,
-      concentrationUnit: r.concentrationUnit,
-      manufacturerName: r.manufacturerName,
-      brandName: r.brandName,
-      onLabelDoseText: r.onLabelDoseText,
-      displayName: buildDisplayName({
+    return reply.send({
+      medications: rows.map((r) => ({
+        id: r.medicationId,
         chemicalName: r.chemicalName,
-        brandName: r.brandName,
-        manufacturerName: r.manufacturerName,
         format: r.format,
         concentrationValue: r.concentrationValue,
         concentrationUnit: r.concentrationUnit,
-      }),
-      currentStandard: {
-        id: r.standardId,
-        usesOffLabel: r.usesOffLabel,
-        standardDoseText: r.standardDoseText,
-        startDate: r.startDate,
-        endDate: r.endDate,
-      },
-    }));
-
-    return reply.send({ medications: meds });
+        manufacturerName: r.manufacturerName,
+        brandName: r.brandName,
+        onLabelDoseText: r.onLabelDoseText,
+        displayName: buildDisplayName({
+          chemicalName: r.chemicalName,
+          brandName: r.brandName,
+          manufacturerName: r.manufacturerName,
+          format: r.format,
+          concentrationValue: r.concentrationValue,
+          concentrationUnit: r.concentrationUnit,
+        }),
+        currentStandard: {
+          id: r.standardId,
+          usesOffLabel: r.usesOffLabel,
+          standardDoseText: r.standardDoseText,
+          startDate: r.startDate,
+          endDate: r.endDate,
+        },
+      })),
+    });
   });
 
   /**
-   * Default view: inventory derived from purchases
-   * Returns quantities grouped by unit to avoid unit-mismatch problems.
+   * Inventory derived from purchases
+   * GET /api/medications/inventory?ranchId=...
    */
   app.get("/medications/inventory", async (req, reply) => {
     const q = ListInventoryQuery.parse(req.query);
@@ -250,8 +254,8 @@ export async function medicationsRoutes(app: FastifyInstance) {
         medicationPurchases,
         and(
           eq(medicationPurchases.standardMedicationId, standardMedications.id),
-          eq(medicationPurchases.ranchId, q.ranchId),
-        ),
+          eq(medicationPurchases.ranchId, q.ranchId)
+        )
       )
       .where(eq(standardMedications.ranchId, q.ranchId))
       .groupBy(
@@ -262,22 +266,15 @@ export async function medicationsRoutes(app: FastifyInstance) {
         standardMedications.concentrationUnit,
         standardMedications.manufacturerName,
         standardMedications.brandName,
-        medicationPurchases.purchaseUnit,
+        medicationPurchases.purchaseUnit
       )
       .orderBy(standardMedications.chemicalName, standardMedications.brandName);
 
-    // Collapse unit-group rows into one medication row
     const map = new Map<
       string,
       {
         id: string;
         displayName: string;
-        chemicalName: string;
-        brandName: string;
-        manufacturerName: string;
-        format: string;
-        concentrationValue: string | null;
-        concentrationUnit: string | null;
         units: Array<{ unit: string; quantity: string }>;
         lastPurchaseDate: string | null;
       }
@@ -298,12 +295,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
         map.set(r.medicationId, {
           id: r.medicationId,
           displayName,
-          chemicalName: r.chemicalName,
-          brandName: r.brandName,
-          manufacturerName: r.manufacturerName,
-          format: r.format,
-          concentrationValue: r.concentrationValue,
-          concentrationUnit: r.concentrationUnit,
           units: [],
           lastPurchaseDate: r.lastPurchaseDate ?? null,
         });
@@ -311,15 +302,10 @@ export async function medicationsRoutes(app: FastifyInstance) {
 
       const entry = map.get(r.medicationId)!;
 
-      // purchaseUnit may be null if there are no purchases
       if (r.purchaseUnit) {
-        entry.units.push({
-          unit: r.purchaseUnit,
-          quantity: r.onHandQuantity,
-        });
+        entry.units.push({ unit: r.purchaseUnit, quantity: r.onHandQuantity });
       }
 
-      // lastPurchaseDate: take max across grouped rows
       if (r.lastPurchaseDate) {
         if (!entry.lastPurchaseDate || r.lastPurchaseDate > entry.lastPurchaseDate) {
           entry.lastPurchaseDate = r.lastPurchaseDate;
@@ -331,7 +317,8 @@ export async function medicationsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Ranch Standards list (includeRetired toggle)
+   * Standards list
+   * GET /api/ranch-medication-standards?ranchId=...&includeRetired=true|false
    */
   app.get("/ranch-medication-standards", async (req, reply) => {
     const q = ListStandardsQuery.parse(req.query);
@@ -362,8 +349,8 @@ export async function medicationsRoutes(app: FastifyInstance) {
         standardMedications,
         and(
           eq(standardMedications.id, ranchMedicationStandards.standardMedicationId),
-          eq(standardMedications.ranchId, q.ranchId),
-        ),
+          eq(standardMedications.ranchId, q.ranchId)
+        )
       )
       .where(whereClause)
       .orderBy(desc(ranchMedicationStandards.startDate), standardMedications.chemicalName);
@@ -390,7 +377,8 @@ export async function medicationsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Retire a standard (sets endDate)
+   * Retire a standard
+   * POST /api/ranch-medication-standards/:id/retire
    */
   app.post("/ranch-medication-standards/:id/retire", async (req, reply) => {
     const params = RetireStandardParams.parse(req.params);
@@ -401,7 +389,12 @@ export async function medicationsRoutes(app: FastifyInstance) {
     const updated = await db
       .update(ranchMedicationStandards)
       .set({ endDate })
-      .where(and(eq(ranchMedicationStandards.id, params.id), eq(ranchMedicationStandards.ranchId, body.ranchId)))
+      .where(
+        and(
+          eq(ranchMedicationStandards.id, params.id),
+          eq(ranchMedicationStandards.ranchId, body.ranchId)
+        )
+      )
       .returning({
         id: ranchMedicationStandards.id,
         standardMedicationId: ranchMedicationStandards.standardMedicationId,

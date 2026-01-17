@@ -42,6 +42,7 @@ import SuppliesOverviewPage from "./modules/supplies/pages/SuppliesOverviewPage"
 import FeedPage from "./modules/supplies/pages/FeedPage";
 import MineralsPage from "./modules/supplies/pages/MineralsPage";
 import MedicationsPage from "./modules/supplies/pages/MedicationsPage";
+import CreateStandardMedicationsPage from "./modules/supplies/pages/CreateStandardMedicationsPage";
 import FuelPage from "./modules/supplies/pages/FuelPage";
 import ToolsPage from "./modules/supplies/pages/ToolsPage";
 
@@ -110,6 +111,7 @@ export const router = createBrowserRouter([
           { path: "supplies/feed", element: <FeedPage /> },
           { path: "supplies/minerals", element: <MineralsPage /> },
           { path: "supplies/medications", element: <MedicationsPage /> },
+          { path: "supplies/medications/standards/create", element: <CreateStandardMedicationsPage /> },
           { path: "supplies/fuel", element: <FuelPage /> },
           { path: "supplies/tools", element: <ToolsPage /> },
 

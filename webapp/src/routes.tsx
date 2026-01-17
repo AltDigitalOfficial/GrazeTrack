@@ -1,4 +1,3 @@
-
 export const ROUTES = {
   auth: {
     login: "/login",
@@ -38,7 +37,11 @@ export const ROUTES = {
     root: "/supplies",
     feed: "/supplies/feed",
     minerals: "/supplies/minerals",
+
     medications: "/supplies/medications",
+    medicationsStandardsCreate: "/supplies/medications/standards/create",
+    medicationsPurchasesCreate: "/supplies/medications/purchases/create",
+
     fuel: "/supplies/fuel",
     tools: "/supplies/tools",
   },
@@ -78,4 +81,3 @@ export const ROUTES = {
     accounting: "/admin/accounting",
   },
 } as const;
-
