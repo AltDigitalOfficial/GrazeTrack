@@ -12,7 +12,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 type InventoryRow = {
   id: string;
   displayName: string;
-  units: Array<{ unit: string; quantity: string }>;
+  quantity: string; // backend returns string
+  unit: string;     // derived canonical unit
   lastPurchaseDate: string | null;
 };
 
@@ -26,6 +27,11 @@ type StandardRow = {
   endDate: string | null;
   createdAt: string | Date;
 };
+
+function toNumberSafe(v: string): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
 
 export default function MedicationsPage() {
   const navigate = useNavigate();
@@ -108,7 +114,6 @@ export default function MedicationsPage() {
         ranchId: activeRanchId,
       });
 
-      // Refresh list after retire
       await loadStandards(activeRanchId, showRetired);
     } catch (e: any) {
       setRetireError(e?.message || "Failed to retire standard");
@@ -146,8 +151,7 @@ export default function MedicationsPage() {
       <Card title="Medication Inventory">
         <div className="space-y-3">
           <p className="text-stone-600">
-            Inventory is derived from purchases. This view shows current on-hand quantities grouped
-            by unit.
+            Inventory is derived from purchases. Units are canonical per medication (derived from the medication format).
           </p>
 
           {inventoryError && <div className="text-sm text-red-600">Error: {inventoryError}</div>}
@@ -167,29 +171,28 @@ export default function MedicationsPage() {
               </div>
             ) : (
               <div className="divide-y">
-                {inventory.map((row) => (
-                  <div key={row.id} className="grid grid-cols-12 gap-2 px-3 py-3 text-sm">
-                    <div className="col-span-6 font-medium text-stone-800">{row.displayName}</div>
+                {inventory.map((row) => {
+                  const qtyNum = toNumberSafe(row.quantity);
+                  return (
+                    <div key={row.id} className="grid grid-cols-12 gap-2 px-3 py-3 text-sm">
+                      <div className="col-span-6 font-medium text-stone-800">{row.displayName}</div>
 
-                    <div className="col-span-3 text-stone-700">
-                      {row.units.length === 0 ? (
-                        <span className="text-stone-500">—</span>
-                      ) : (
-                        <div className="space-y-1">
-                          {row.units.map((u, idx) => (
-                            <div key={`${u.unit}-${idx}`}>
-                              {u.quantity} {u.unit}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                      <div className="col-span-3 text-stone-700">
+                        {qtyNum <= 0 ? (
+                          <span className="text-stone-500">—</span>
+                        ) : (
+                          <span>
+                            {row.quantity} {row.unit}
+                          </span>
+                        )}
+                      </div>
 
-                    <div className="col-span-3 text-stone-700">
-                      {row.lastPurchaseDate ?? <span className="text-stone-500">—</span>}
+                      <div className="col-span-3 text-stone-700">
+                        {row.lastPurchaseDate ?? <span className="text-stone-500">—</span>}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

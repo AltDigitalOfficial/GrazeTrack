@@ -2,15 +2,17 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, eq, isNull, desc } from "drizzle-orm";
+
+import { db } from "../db";
+
+// NOTE: use whichever schema file actually exports these in your project.
+// Your current file used ../db/schema. Keep that convention here.
 import {
   medicationPurchases,
   suppliers,
   standardMedications,
   ranchMedicationStandards,
 } from "../db/schema";
-
-// Adjust this import to your actual DB export location:
-import { db } from "../db";
 
 function normalizeName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
@@ -24,12 +26,27 @@ function todayIsoDate(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function canonicalUnitFromFormat(format: string): string {
+  switch ((format || "").toLowerCase()) {
+    case "pill":
+      return "pills";
+    case "powder":
+      return "g";
+    case "liquid":
+    case "injectable":
+    case "paste":
+    case "topical":
+      return "mL";
+    default:
+      return "units";
+  }
+}
+
 const CreatePurchaseBody = z.object({
   ranchId: z.string().min(1),
 
-  // user either selects an existing standardMedicationId OR creates a new one inline
+  // Either choose existing OR create inline
   standardMedicationId: z.string().min(1).optional(),
-
   createNewMedication: z
     .object({
       chemicalName: z.string().min(1),
@@ -47,13 +64,17 @@ const CreatePurchaseBody = z.object({
     })
     .optional(),
 
-  quantity: z.union([z.string(), z.number()]),
-  purchaseUnit: z.string().min(1),
+  quantity: z.union([z.string(), z.number()]).transform((v) => {
+    const s = String(v).trim();
+    if (!s) throw new Error("Quantity is required");
+    const n = Number(s);
+    if (!Number.isFinite(n) || n <= 0) throw new Error("Quantity must be a positive number");
+    return n;
+  }),
+
   totalPrice: z.union([z.string(), z.number()]).optional().nullable(),
-
-  supplierName: z.string().optional().nullable(), // "Walmart"
+  supplierName: z.string().min(1),
   purchaseDate: z.string().min(10).optional(), // default today
-
   notes: z.string().optional().nullable(),
 });
 
@@ -68,10 +89,12 @@ const ListPurchasesQuery = z.object({
 
 async function upsertSupplier(ranchId: string, name: string): Promise<string> {
   const normalized = normalizeName(name);
+
   const existing = await db
     .select({ id: suppliers.id })
     .from(suppliers)
-    .where(and(eq(suppliers.ranchId, ranchId), eq(suppliers.nameNormalized, normalized)));
+    .where(and(eq(suppliers.ranchId, ranchId), eq(suppliers.nameNormalized, normalized)))
+    .limit(1);
 
   if (existing.length > 0) return existing[0].id;
 
@@ -90,9 +113,9 @@ async function upsertSupplier(ranchId: string, name: string): Promise<string> {
 export async function medicationPurchasesRoutes(app: FastifyInstance) {
   /**
    * Create Purchase
-   * - supports inline "Add New Medication" creation (standard_medications + active ranch standard)
-   * - supplier upsert
-   * - append-only purchase record
+   * - Append-only
+   * - If createNewMedication provided: create standard_medications + active ranch standard in same transaction
+   * - purchaseUnit is REMOVED. Unit is derived from standardMedications.format.
    */
   app.post("/medication-purchases", async (req, reply) => {
     const body = CreatePurchaseBody.parse(req.body);
@@ -100,21 +123,40 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
     const now = new Date();
     const purchaseDate = body.purchaseDate ?? todayIsoDate();
 
-    // Determine standardMedicationId:
-    // - if user selected an existing med, use it
-    // - otherwise, they must provide createNewMedication, and we create it inline
+    if (!!body.standardMedicationId === !!body.createNewMedication) {
+      return reply.code(400).send({
+        error: "Provide exactly one of standardMedicationId OR createNewMedication",
+      });
+    }
+
     let standardMedicationId: string;
+    let medFormat: string;
 
     if (body.standardMedicationId) {
-      standardMedicationId = body.standardMedicationId;
-    } else {
-      const newMed = body.createNewMedication;
-      if (!newMed) {
-        return reply.code(400).send({
-          error: "Must provide standardMedicationId or createNewMedication",
-        });
+      // Verify med belongs to ranch + fetch format
+      const rows = await db
+        .select({
+          id: standardMedications.id,
+          format: standardMedications.format,
+        })
+        .from(standardMedications)
+        .where(
+          and(
+            eq(standardMedications.ranchId, body.ranchId),
+            eq(standardMedications.id, body.standardMedicationId),
+          ),
+        )
+        .limit(1);
+
+      if (rows.length === 0) {
+        return reply.code(404).send({ error: "Standard medication not found" });
       }
 
+      standardMedicationId = rows[0].id;
+      medFormat = rows[0].format;
+    } else {
+      // Create new medication + new active standard
+      const newMed = body.createNewMedication!;
       const medId = crypto.randomUUID();
       const standardId = crypto.randomUUID();
       const startDate = newMed.standard.startDate ?? todayIsoDate();
@@ -149,10 +191,10 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
       });
 
       standardMedicationId = medId;
+      medFormat = newMed.format;
     }
 
-    // Ensure the medication is eligible for dropdown logic:
-    // only meds with an active standard should be purchasable (per your workflow).
+    // Ensure active ranch standard exists (only active standards are purchasable)
     const activeStandard = await db
       .select({ id: ranchMedicationStandards.id })
       .from(ranchMedicationStandards)
@@ -162,7 +204,8 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
           eq(ranchMedicationStandards.standardMedicationId, standardMedicationId),
           isNull(ranchMedicationStandards.endDate),
         ),
-      );
+      )
+      .limit(1);
 
     if (activeStandard.length === 0) {
       return reply.code(400).send({
@@ -170,10 +213,7 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
       });
     }
 
-    let supplierId: string | null = null;
-    if (body.supplierName && body.supplierName.trim().length > 0) {
-      supplierId = await upsertSupplier(body.ranchId, body.supplierName);
-    }
+    const supplierId = await upsertSupplier(body.ranchId, body.supplierName);
 
     const purchaseId = crypto.randomUUID();
     await db.insert(medicationPurchases).values({
@@ -183,7 +223,6 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
       supplierId,
       purchaseDate,
       quantity: String(body.quantity),
-      purchaseUnit: body.purchaseUnit,
       totalPrice:
         body.totalPrice === null || body.totalPrice === undefined ? null : String(body.totalPrice),
       notes: body.notes ?? null,
@@ -193,15 +232,18 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
     return reply.send({
       purchase: {
         id: purchaseId,
+        ranchId: body.ranchId,
         standardMedicationId,
-        supplierId,
         purchaseDate,
+        quantity: String(body.quantity),
+        unit: canonicalUnitFromFormat(medFormat),
+        supplierId,
       },
     });
   });
 
   /**
-   * Purchase history for a medication
+   * Purchase history for a medication (derived unit)
    */
   app.get("/medication-purchases", async (req, reply) => {
     const q = ListPurchasesQuery.parse(req.query);
@@ -211,17 +253,18 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
         id: medicationPurchases.id,
         purchaseDate: medicationPurchases.purchaseDate,
         quantity: medicationPurchases.quantity,
-        purchaseUnit: medicationPurchases.purchaseUnit,
         totalPrice: medicationPurchases.totalPrice,
         notes: medicationPurchases.notes,
         supplierId: medicationPurchases.supplierId,
-
-        supplierName: suppliers.name,
+        medFormat: standardMedications.format,
       })
       .from(medicationPurchases)
-      .leftJoin(
-        suppliers,
-        and(eq(suppliers.id, medicationPurchases.supplierId), eq(suppliers.ranchId, q.ranchId)),
+      .innerJoin(
+        standardMedications,
+        and(
+          eq(standardMedications.id, medicationPurchases.standardMedicationId),
+          eq(standardMedications.ranchId, q.ranchId),
+        ),
       )
       .where(
         and(
@@ -232,6 +275,16 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
       .orderBy(desc(medicationPurchases.purchaseDate), desc(medicationPurchases.createdAt))
       .limit(q.limit);
 
-    return reply.send({ purchases: rows });
+    return reply.send({
+      purchases: rows.map((r) => ({
+        id: r.id,
+        purchaseDate: r.purchaseDate,
+        quantity: r.quantity,
+        unit: canonicalUnitFromFormat(r.medFormat),
+        totalPrice: r.totalPrice,
+        notes: r.notes,
+        supplierId: r.supplierId,
+      })),
+    });
   });
 }

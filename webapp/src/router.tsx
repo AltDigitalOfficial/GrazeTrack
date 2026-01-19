@@ -43,6 +43,7 @@ import FeedPage from "./modules/supplies/pages/FeedPage";
 import MineralsPage from "./modules/supplies/pages/MineralsPage";
 import MedicationsPage from "./modules/supplies/pages/MedicationsPage";
 import CreateStandardMedicationsPage from "./modules/supplies/pages/CreateStandardMedicationsPage";
+import CreateMedicationPurchasePage from "./modules/supplies/pages/CreateMedicationPurchasePage";
 import FuelPage from "./modules/supplies/pages/FuelPage";
 import ToolsPage from "./modules/supplies/pages/ToolsPage";
 
@@ -73,16 +74,14 @@ export const router = createBrowserRouter([
   // ✅ Public
   { path: ROUTES.auth.login, element: <LoginPage /> },
 
-  // ✅ Protected (AuthGate supplies Outlet)
+  // ✅ Protected
   {
     path: ROUTES.ranch.overview, // "/"
     element: <AuthGate />,
     children: [
-      // ✅ App layout (Sidebar + Outlet)
       {
         element: <Shell />,
         children: [
-          // Home
           { index: true, element: <RanchOverviewPage /> },
 
           // Herd
@@ -112,6 +111,7 @@ export const router = createBrowserRouter([
           { path: "supplies/minerals", element: <MineralsPage /> },
           { path: "supplies/medications", element: <MedicationsPage /> },
           { path: "supplies/medications/standards/create", element: <CreateStandardMedicationsPage /> },
+          { path: "supplies/medications/purchases/create", element: <CreateMedicationPurchasePage /> },
           { path: "supplies/fuel", element: <FuelPage /> },
           { path: "supplies/tools", element: <ToolsPage /> },
 

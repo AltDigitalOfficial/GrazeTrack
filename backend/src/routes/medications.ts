@@ -1,15 +1,13 @@
 // src/routes/medications.ts
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { and, eq, isNull, sql, desc } from "drizzle-orm";
-import {
-  standardMedications,
-  ranchMedicationStandards,
-  medicationPurchases,
-} from "../db/schema";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
-// Adjust this import to your actual DB export location:
 import { db } from "../db";
+
+// Keep your project’s export style consistent.
+// Your current file imports from ../db/schema, so we keep that.
+import { medicationPurchases, ranchMedicationStandards, standardMedications } from "../db/schema";
 
 function todayIsoDate(): string {
   const d = new Date();
@@ -17,6 +15,22 @@ function todayIsoDate(): string {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function canonicalUnitFromFormat(format: string): string {
+  switch ((format || "").toLowerCase()) {
+    case "pill":
+      return "pills";
+    case "powder":
+      return "g";
+    case "liquid":
+    case "injectable":
+    case "paste":
+    case "topical":
+      return "mL";
+    default:
+      return "units";
+  }
 }
 
 function buildDisplayName(m: {
@@ -64,27 +78,18 @@ const ListInventoryQuery = z.object({
 
 const ListStandardsQuery = z.object({
   ranchId: z.string().min(1),
-  includeRetired: z
-    .string()
-    .optional()
-    .transform((v) => v === "true"),
+  includeRetired: z.string().optional().transform((v) => v === "true"),
 });
 
-const RetireStandardParams = z.object({
-  id: z.string().min(1),
-});
+const RetireStandardParams = z.object({ id: z.string().min(1) });
 const RetireStandardBody = z.object({
   ranchId: z.string().min(1),
-  endDate: z.string().min(10).optional(), // YYYY-MM-DD
+  endDate: z.string().min(10).optional(),
 });
 
 export async function medicationsRoutes(app: FastifyInstance) {
   /**
-   * Create a Standard Medication + initial active Ranch Standard
-   *
-   * IMPORTANT:
-   * server.ts registers this routes file with prefix "/api"
-   * so this path becomes POST /api/standard-medications
+   * Create Standard Medication + initial active Ranch Standard
    */
   app.post("/standard-medications", async (req, reply) => {
     const body = CreateStandardMedicationBody.parse(req.body);
@@ -127,17 +132,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
     return reply.send({
       medication: {
         id: medicationId,
-        ranchId: body.ranchId,
-        chemicalName: body.chemicalName,
-        format: body.format,
-        concentrationValue:
-          body.concentrationValue === null || body.concentrationValue === undefined
-            ? null
-            : String(body.concentrationValue),
-        concentrationUnit: body.concentrationUnit ?? null,
-        manufacturerName: body.manufacturerName,
-        brandName: body.brandName,
-        onLabelDoseText: body.onLabelDoseText ?? null,
         displayName: buildDisplayName({
           chemicalName: body.chemicalName,
           brandName: body.brandName,
@@ -161,10 +155,8 @@ export async function medicationsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Dropdown source for "Record Purchase":
-   * only Standard Medications that have an ACTIVE standard (endDate is null)
-   *
-   * GET /api/standard-medications/active?ranchId=...
+   * Dropdown for Record Purchase:
+   * only medications with an ACTIVE standard (endDate is null)
    */
   app.get("/standard-medications/active", async (req, reply) => {
     const q = ListActiveDropdownQuery.parse(req.query);
@@ -172,7 +164,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
     const rows = await db
       .select({
         medicationId: standardMedications.id,
-        ranchId: standardMedications.ranchId,
         chemicalName: standardMedications.chemicalName,
         format: standardMedications.format,
         concentrationValue: standardMedications.concentrationValue,
@@ -230,7 +221,8 @@ export async function medicationsRoutes(app: FastifyInstance) {
 
   /**
    * Inventory derived from purchases
-   * GET /api/medications/inventory?ranchId=...
+   * - purchase_unit removed entirely
+   * - quantity is always treated as canonical units derived from medication format
    */
   app.get("/medications/inventory", async (req, reply) => {
     const q = ListInventoryQuery.parse(req.query);
@@ -245,7 +237,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
         manufacturerName: standardMedications.manufacturerName,
         brandName: standardMedications.brandName,
 
-        purchaseUnit: medicationPurchases.purchaseUnit,
         onHandQuantity: sql<string>`COALESCE(SUM(${medicationPurchases.quantity}), 0)`,
         lastPurchaseDate: sql<string | null>`MAX(${medicationPurchases.purchaseDate})`,
       })
@@ -265,60 +256,30 @@ export async function medicationsRoutes(app: FastifyInstance) {
         standardMedications.concentrationValue,
         standardMedications.concentrationUnit,
         standardMedications.manufacturerName,
-        standardMedications.brandName,
-        medicationPurchases.purchaseUnit
+        standardMedications.brandName
       )
       .orderBy(standardMedications.chemicalName, standardMedications.brandName);
 
-    const map = new Map<
-      string,
-      {
-        id: string;
-        displayName: string;
-        units: Array<{ unit: string; quantity: string }>;
-        lastPurchaseDate: string | null;
-      }
-    >();
-
-    for (const r of rows) {
-      const existing = map.get(r.medicationId);
-      const displayName = buildDisplayName({
-        chemicalName: r.chemicalName,
-        brandName: r.brandName,
-        manufacturerName: r.manufacturerName,
-        format: r.format,
-        concentrationValue: r.concentrationValue,
-        concentrationUnit: r.concentrationUnit,
-      });
-
-      if (!existing) {
-        map.set(r.medicationId, {
-          id: r.medicationId,
-          displayName,
-          units: [],
-          lastPurchaseDate: r.lastPurchaseDate ?? null,
-        });
-      }
-
-      const entry = map.get(r.medicationId)!;
-
-      if (r.purchaseUnit) {
-        entry.units.push({ unit: r.purchaseUnit, quantity: r.onHandQuantity });
-      }
-
-      if (r.lastPurchaseDate) {
-        if (!entry.lastPurchaseDate || r.lastPurchaseDate > entry.lastPurchaseDate) {
-          entry.lastPurchaseDate = r.lastPurchaseDate;
-        }
-      }
-    }
-
-    return reply.send({ inventory: Array.from(map.values()) });
+    return reply.send({
+      inventory: rows.map((r) => ({
+        id: r.medicationId,
+        displayName: buildDisplayName({
+          chemicalName: r.chemicalName,
+          brandName: r.brandName,
+          manufacturerName: r.manufacturerName,
+          format: r.format,
+          concentrationValue: r.concentrationValue,
+          concentrationUnit: r.concentrationUnit,
+        }),
+        quantity: r.onHandQuantity,
+        unit: canonicalUnitFromFormat(r.format),
+        lastPurchaseDate: r.lastPurchaseDate ?? null,
+      })),
+    });
   });
 
   /**
-   * Standards list
-   * GET /api/ranch-medication-standards?ranchId=...&includeRetired=true|false
+   * Ranch standards list (includeRetired toggle)
    */
   app.get("/ranch-medication-standards", async (req, reply) => {
     const q = ListStandardsQuery.parse(req.query);
@@ -377,8 +338,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Retire a standard
-   * POST /api/ranch-medication-standards/:id/retire
+   * Retire a standard (sets endDate)
    */
   app.post("/ranch-medication-standards/:id/retire", async (req, reply) => {
     const params = RetireStandardParams.parse(req.params);

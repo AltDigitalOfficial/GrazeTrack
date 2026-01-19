@@ -226,7 +226,6 @@ export const medicationPurchases = pgTable(
     purchaseDate: date("purchase_date").notNull(),
 
     quantity: decimal("quantity").notNull(),
-    purchaseUnit: text("purchase_unit").notNull(), // pills, bottles, mL, cc, doses, etc.
     totalPrice: decimal("total_price"), // optional
 
     notes: text("notes"),
