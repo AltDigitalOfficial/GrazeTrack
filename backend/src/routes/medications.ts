@@ -17,18 +17,14 @@ import {
 import { requireAuth } from "../plugins/requireAuth";
 
 /* ------------------------------------------------------------------------------------------------
- * Small local helpers
+ * Helpers
  * ------------------------------------------------------------------------------------------------ */
 
 function ensureDir(dirPath: string) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
+  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
 }
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  // v1: pick the first ranch the user is a member of.
-  // If later you add an “active ranch” concept, change it here once and all routes follow.
   const rows = await db
     .select({ ranchId: userRanches.ranchId })
     .from(userRanches)
@@ -77,24 +73,66 @@ function buildDisplayName(m: {
   return `${m.brandName} — ${m.chemicalName}${conc} (${m.format})`;
 }
 
-/**
- * Supports multipart:
- * - fields in req.body
- * - files from req.saveRequestFiles()
- */
-async function parseMultipartRequest(req: any): Promise<{
-  body: Record<string, any>;
-  files: any[];
-}> {
+async function parseMultipartRequest(req: any): Promise<{ body: Record<string, any>; files: any[] }> {
   const contentType = String(req.headers?.["content-type"] ?? "");
   const isMultipart = contentType.includes("multipart/form-data");
 
+  // Fastify multipart does NOT reliably populate req.body unless attachFieldsToBody is enabled.
+  // So for multipart, read fields + files from the multipart stream.
+  if (isMultipart && typeof req.parts === "function") {
+    const body: Record<string, any> = {};
+    const files: any[] = [];
+
+    for await (const part of req.parts()) {
+      if (part.type === "file") {
+        files.push(part);
+      } else {
+        body[part.fieldname] = part.value;
+      }
+    }
+
+    return { body, files };
+  }
+
+  // Fallback for setups that rely on temp-file writing
   if (isMultipart && typeof req.saveRequestFiles === "function") {
     const files = await req.saveRequestFiles();
     return { body: (req.body ?? {}) as Record<string, any>, files };
   }
 
   return { body: (req.body ?? {}) as Record<string, any>, files: [] };
+}
+
+/**
+ * Fastify multipart can yield body values as:
+ * - string
+ * - number
+ * - { value: string }
+ * - arrays of the above
+ *
+ * Normalize to plain JS primitives; also parse `standard` JSON string.
+ */
+function normalizeBody(raw: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+
+  for (const [k, v] of Object.entries(raw ?? {})) {
+    if (v && typeof v === "object" && "value" in v) {
+      out[k] = (v as any).value;
+      continue;
+    }
+    out[k] = v;
+  }
+
+  // Parse nested standard JSON if it’s present as a string
+  if (typeof out.standard === "string") {
+    try {
+      out.standard = JSON.parse(out.standard);
+    } catch {
+      // leave it as string so Zod error is explicit
+    }
+  }
+
+  return out;
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -108,20 +146,18 @@ const CreateStandardMedicationBody = z.object({
   concentrationValue: z.union([z.string(), z.number()]).optional().nullable(),
   concentrationUnit: z.string().optional().nullable(),
 
-  manufacturerName: z.string().min(1), // allow "Generic"
-  brandName: z.string().min(1), // allow "Generic"
+  manufacturerName: z.string().min(1),
+  brandName: z.string().min(1),
 
   onLabelDoseText: z.string().optional().nullable(),
 
   standard: z.object({
     usesOffLabel: z.union([z.boolean(), z.string()]).transform((v) => v === true || v === "true"),
     standardDoseText: z.string().min(1),
-    startDate: z.string().min(10).optional(), // YYYY-MM-DD
+    startDate: z.string().min(10).optional(),
   }),
 });
 
-const ListActiveDropdownQuery = z.object({});
-const ListInventoryQuery = z.object({});
 const ListStandardsQuery = z.object({
   includeRetired: z
     .string()
@@ -129,38 +165,22 @@ const ListStandardsQuery = z.object({
     .transform((v) => v === "true"),
 });
 
-const RetireStandardParams = z.object({
-  id: z.string().min(1),
-});
-const RetireStandardBody = z.object({
-  endDate: z.string().min(10).optional(), // YYYY-MM-DD
-});
-
-const StandardImagesParams = z.object({
-  standardMedicationId: z.string().min(1),
-});
+const RetireStandardParams = z.object({ id: z.string().min(1) });
+const RetireStandardBody = z.object({ endDate: z.string().min(10).optional() });
+const StandardImagesParams = z.object({ standardMedicationId: z.string().min(1) });
 
 /* ------------------------------------------------------------------------------------------------
  * Routes
  * ------------------------------------------------------------------------------------------------ */
 
 export async function medicationsRoutes(app: FastifyInstance) {
-  /**
-   * CREATE Standard Medication + initial active Ranch Standard
-   * Optional multipart images stored to:
-   *   images/ranches/<ranchId>/medications/standards/<standardMedicationId>/<purpose>/
-   *
-   * Expected multipart file fieldnames (repeat allowed):
-   * - label
-   * - insert
-   * - misc
-   */
   app.post("/standard-medications", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
 
-      const { body, files } = await parseMultipartRequest(req);
+      const { body: rawBody, files } = await parseMultipartRequest(req);
+      const body = normalizeBody(rawBody);
 
       const parsed = CreateStandardMedicationBody.safeParse(body);
       if (!parsed.success) {
@@ -206,7 +226,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
         });
       });
 
-      // Save images (if any) and record metadata rows
       if (files.length > 0) {
         const ranchRoot = await ensureRanchStructure(ranchId);
 
@@ -214,13 +233,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
           const field = String(file.fieldname || "").toLowerCase();
           const purpose = field === "label" || field === "insert" || field === "misc" ? field : "misc";
 
-          const destDir = path.join(
-            ranchRoot,
-            "medications",
-            "standards",
-            medicationId,
-            purpose
-          );
+          const destDir = path.join(ranchRoot, "medications", "standards", medicationId, purpose);
           ensureDir(destDir);
 
           const saved = await saveUploadedFile(file, destDir);
@@ -234,7 +247,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
             originalFilename: file.filename ?? null,
             mimeType: file.mimetype ?? null,
             sizeBytes: typeof file.size === "number" ? file.size : null,
-            // created_at handled by DB default
           });
         }
       }
@@ -264,21 +276,12 @@ export async function medicationsRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       req.log.error({ err }, "Failed to create standard medication");
-      return reply.status(500).send({
-        error: "Failed to create standard medication",
-        message: err?.message,
-      });
+      return reply.status(500).send({ error: "Failed to create standard medication", message: err?.message });
     }
   });
 
-  /**
-   * Active medications for dropdown
-   * - only meds that have an active ranch standard (end_date is null)
-   */
   app.get("/standard-medications/active", { preHandler: requireAuth }, async (req, reply) => {
     try {
-      ListActiveDropdownQuery.parse(req.query ?? {});
-
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
 
@@ -344,39 +347,22 @@ export async function medicationsRoutes(app: FastifyInstance) {
     }
   });
 
-  /**
-   * ⭐ NEW ⭐
-   * Standard Medication Images
-   *
-   * Used by CreateMedicationPurchasePage to show photos for the selected standard.
-   * URL format assumes your server exposes /images -> images root folder:
-   *   /images/ranches/<ranchId>/medications/standards/<standardMedicationId>/<purpose>/<stored_filename>
-   */
   app.get(
     "/standard-medications/:standardMedicationId/images",
     { preHandler: requireAuth },
     async (req, reply) => {
       try {
         const { standardMedicationId } = StandardImagesParams.parse(req.params ?? {});
-
         const ranchId = await getActiveRanchId(req.auth!.userId);
         if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
 
-        // Ensure medication is in this ranch
         const med = await db
           .select({ id: standardMedications.id })
           .from(standardMedications)
-          .where(
-            and(
-              eq(standardMedications.id, standardMedicationId),
-              eq(standardMedications.ranchId, ranchId)
-            )
-          )
+          .where(and(eq(standardMedications.id, standardMedicationId), eq(standardMedications.ranchId, ranchId)))
           .limit(1);
 
-        if (!med.length) {
-          return reply.status(404).send({ error: "Standard medication not found" });
-        }
+        if (!med.length) return reply.status(404).send({ error: "Standard medication not found" });
 
         const images = await db
           .select({
@@ -412,23 +398,13 @@ export async function medicationsRoutes(app: FastifyInstance) {
         });
       } catch (err: any) {
         req.log.error({ err }, "Failed to list standard medication images");
-        return reply.status(500).send({
-          error: "Failed to list standard medication images",
-          message: err?.message,
-        });
+        return reply.status(500).send({ error: "Failed to list standard medication images", message: err?.message });
       }
     }
   );
 
-  /**
-   * Inventory derived from purchases
-   * - purchase_unit removed entirely
-   * - quantity always treated as canonical units derived from medication format
-   */
   app.get("/medications/inventory", { preHandler: requireAuth }, async (req, reply) => {
     try {
-      ListInventoryQuery.parse(req.query ?? {});
-
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
 
@@ -441,7 +417,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
           concentrationUnit: standardMedications.concentrationUnit,
           manufacturerName: standardMedications.manufacturerName,
           brandName: standardMedications.brandName,
-
           onHandQuantity: sql<string>`COALESCE(SUM(${medicationPurchases.quantity}), 0)`,
           lastPurchaseDate: sql<string | null>`MAX(${medicationPurchases.purchaseDate})`,
         })
@@ -487,9 +462,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
     }
   });
 
-  /**
-   * Ranch standards list (includeRetired toggle)
-   */
   app.get("/ranch-medication-standards", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const q = ListStandardsQuery.parse(req.query ?? {});
@@ -509,7 +481,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
           startDate: ranchMedicationStandards.startDate,
           endDate: ranchMedicationStandards.endDate,
           createdAt: ranchMedicationStandards.createdAt,
-
           chemicalName: standardMedications.chemicalName,
           format: standardMedications.format,
           concentrationValue: standardMedications.concentrationValue,
@@ -553,14 +524,10 @@ export async function medicationsRoutes(app: FastifyInstance) {
     }
   });
 
-  /**
-   * Retire a standard (sets endDate)
-   */
   app.post("/ranch-medication-standards/:id/retire", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const params = RetireStandardParams.parse(req.params ?? {});
       const body = RetireStandardBody.parse(req.body ?? {});
-
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
 
@@ -576,10 +543,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
           endDate: ranchMedicationStandards.endDate,
         });
 
-      if (updated.length === 0) {
-        return reply.status(404).send({ error: "Standard not found" });
-      }
-
+      if (updated.length === 0) return reply.status(404).send({ error: "Standard not found" });
       return reply.send({ retired: updated[0] });
     } catch (err: any) {
       req.log.error({ err }, "Failed to retire medication standard");
