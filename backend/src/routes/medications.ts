@@ -16,6 +16,10 @@ import {
 } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
 
+/* ------------------------------------------------------------------------------------------------
+ * Small local helpers
+ * ------------------------------------------------------------------------------------------------ */
+
 function ensureDir(dirPath: string) {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
@@ -23,6 +27,8 @@ function ensureDir(dirPath: string) {
 }
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
+  // v1: pick the first ranch the user is a member of.
+  // If later you add an “active ranch” concept, change it here once and all routes follow.
   const rows = await db
     .select({ ranchId: userRanches.ranchId })
     .from(userRanches)
@@ -72,9 +78,9 @@ function buildDisplayName(m: {
 }
 
 /**
- * We support multipart:
+ * Supports multipart:
  * - fields in req.body
- * - files in req.saveRequestFiles()
+ * - files from req.saveRequestFiles()
  */
 async function parseMultipartRequest(req: any): Promise<{
   body: Record<string, any>;
@@ -90,6 +96,10 @@ async function parseMultipartRequest(req: any): Promise<{
 
   return { body: (req.body ?? {}) as Record<string, any>, files: [] };
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Zod schemas
+ * ------------------------------------------------------------------------------------------------ */
 
 const CreateStandardMedicationBody = z.object({
   chemicalName: z.string().min(1),
@@ -110,14 +120,8 @@ const CreateStandardMedicationBody = z.object({
   }),
 });
 
-const ListActiveDropdownQuery = z.object({
-  // no ranchId here; derived from session
-});
-
-const ListInventoryQuery = z.object({
-  // no ranchId here; derived from session
-});
-
+const ListActiveDropdownQuery = z.object({});
+const ListInventoryQuery = z.object({});
 const ListStandardsQuery = z.object({
   includeRetired: z
     .string()
@@ -132,13 +136,21 @@ const RetireStandardBody = z.object({
   endDate: z.string().min(10).optional(), // YYYY-MM-DD
 });
 
+const StandardImagesParams = z.object({
+  standardMedicationId: z.string().min(1),
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Routes
+ * ------------------------------------------------------------------------------------------------ */
+
 export async function medicationsRoutes(app: FastifyInstance) {
   /**
    * CREATE Standard Medication + initial active Ranch Standard
-   * + optional images saved to:
+   * Optional multipart images stored to:
    *   images/ranches/<ranchId>/medications/standards/<standardMedicationId>/<purpose>/
    *
-   * Expected multipart file fieldnames (can repeat each):
+   * Expected multipart file fieldnames (repeat allowed):
    * - label
    * - insert
    * - misc
@@ -150,8 +162,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
 
       const { body, files } = await parseMultipartRequest(req);
 
-      // Body can come as flat JSON (application/json) OR as multipart fields.
-      // Support both:
       const parsed = CreateStandardMedicationBody.safeParse(body);
       if (!parsed.success) {
         return reply.status(400).send({
@@ -167,7 +177,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
       const now = new Date();
       const startDate = data.standard.startDate ?? todayIsoDate();
 
-      // Create the DB records first, then save images (or in a transaction with best-effort file saving)
       await db.transaction(async (tx) => {
         await tx.insert(standardMedications).values({
           id: medicationId,
@@ -197,14 +206,12 @@ export async function medicationsRoutes(app: FastifyInstance) {
         });
       });
 
-      // Save files to disk + insert image records
+      // Save images (if any) and record metadata rows
       if (files.length > 0) {
         const ranchRoot = await ensureRanchStructure(ranchId);
 
         for (const file of files) {
           const field = String(file.fieldname || "").toLowerCase();
-
-          // standard purposes
           const purpose = field === "label" || field === "insert" || field === "misc" ? field : "misc";
 
           const destDir = path.join(
@@ -214,7 +221,6 @@ export async function medicationsRoutes(app: FastifyInstance) {
             medicationId,
             purpose
           );
-
           ensureDir(destDir);
 
           const saved = await saveUploadedFile(file, destDir);
@@ -228,7 +234,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
             originalFilename: file.filename ?? null,
             mimeType: file.mimetype ?? null,
             sizeBytes: typeof file.size === "number" ? file.size : null,
-            // created_at default in DB
+            // created_at handled by DB default
           });
         }
       }
@@ -266,11 +272,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * ACTIVE medications for dropdown (only those with active standard)
+   * Active medications for dropdown
+   * - only meds that have an active ranch standard (end_date is null)
    */
   app.get("/standard-medications/active", { preHandler: requireAuth }, async (req, reply) => {
     try {
-      // validate query shape (even though empty, keeps pattern consistent)
       ListActiveDropdownQuery.parse(req.query ?? {});
 
       const ranchId = await getActiveRanchId(req.auth!.userId);
@@ -339,7 +345,85 @@ export async function medicationsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * INVENTORY derived from purchases (no purchase_unit; unit derived from medication format)
+   * ⭐ NEW ⭐
+   * Standard Medication Images
+   *
+   * Used by CreateMedicationPurchasePage to show photos for the selected standard.
+   * URL format assumes your server exposes /images -> images root folder:
+   *   /images/ranches/<ranchId>/medications/standards/<standardMedicationId>/<purpose>/<stored_filename>
+   */
+  app.get(
+    "/standard-medications/:standardMedicationId/images",
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      try {
+        const { standardMedicationId } = StandardImagesParams.parse(req.params ?? {});
+
+        const ranchId = await getActiveRanchId(req.auth!.userId);
+        if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+
+        // Ensure medication is in this ranch
+        const med = await db
+          .select({ id: standardMedications.id })
+          .from(standardMedications)
+          .where(
+            and(
+              eq(standardMedications.id, standardMedicationId),
+              eq(standardMedications.ranchId, ranchId)
+            )
+          )
+          .limit(1);
+
+        if (!med.length) {
+          return reply.status(404).send({ error: "Standard medication not found" });
+        }
+
+        const images = await db
+          .select({
+            id: standardMedicationImages.id,
+            purpose: standardMedicationImages.purpose,
+            storedFilename: standardMedicationImages.storedFilename,
+            originalFilename: standardMedicationImages.originalFilename,
+            mimeType: standardMedicationImages.mimeType,
+            sizeBytes: standardMedicationImages.sizeBytes,
+            createdAt: standardMedicationImages.createdAt,
+          })
+          .from(standardMedicationImages)
+          .where(
+            and(
+              eq(standardMedicationImages.standardMedicationId, standardMedicationId),
+              eq(standardMedicationImages.ranchId, ranchId)
+            )
+          )
+          .orderBy(standardMedicationImages.purpose, standardMedicationImages.createdAt);
+
+        const baseUrl = `/images/ranches/${ranchId}/medications/standards/${standardMedicationId}`;
+
+        return reply.send({
+          images: images.map((img) => ({
+            id: img.id,
+            purpose: img.purpose,
+            originalFilename: img.originalFilename,
+            mimeType: img.mimeType,
+            sizeBytes: img.sizeBytes,
+            createdAt: img.createdAt,
+            url: `${baseUrl}/${img.purpose}/${img.storedFilename}`,
+          })),
+        });
+      } catch (err: any) {
+        req.log.error({ err }, "Failed to list standard medication images");
+        return reply.status(500).send({
+          error: "Failed to list standard medication images",
+          message: err?.message,
+        });
+      }
+    }
+  );
+
+  /**
+   * Inventory derived from purchases
+   * - purchase_unit removed entirely
+   * - quantity always treated as canonical units derived from medication format
    */
   app.get("/medications/inventory", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -404,7 +488,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Ranch Standards list (include retired toggle)
+   * Ranch standards list (includeRetired toggle)
    */
   app.get("/ranch-medication-standards", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -470,7 +554,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Retire a standard (set endDate)
+   * Retire a standard (sets endDate)
    */
   app.post("/ranch-medication-standards/:id/retire", { preHandler: requireAuth }, async (req, reply) => {
     try {

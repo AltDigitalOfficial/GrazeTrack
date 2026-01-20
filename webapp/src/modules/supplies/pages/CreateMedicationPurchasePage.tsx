@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 
 type ActiveMedicationOption = {
-  id: string; // standardMedicationId
+  id: string;
   displayName: string;
   format?: string;
   concentrationValue?: string | null;
@@ -28,6 +28,16 @@ type ActiveMedicationOption = {
     startDate: string;
     endDate: string | null;
   };
+};
+
+type StandardMedicationImageDTO = {
+  id: string;
+  purpose: string;
+  url: string;
+  originalFilename?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  createdAt?: string;
 };
 
 const medicationFormatOptions = [
@@ -52,17 +62,14 @@ const concentrationUnitOptions = [
 ] as const;
 
 const FormSchema = z.object({
-  // purchase
-  standardMedicationId: z.string().optional(), // if choosing existing
+  standardMedicationId: z.string().optional(),
   quantity: z.string().min(1, "Quantity is required"),
   totalPrice: z.string().optional(),
   purchaseDate: z.string().min(10, "Purchase date is required"),
   supplierName: z.string().min(1, "Supplier is required"),
 
-  // whether we show the create panel
   creatingNew: z.boolean().optional(),
 
-  // create-new fields (only required when creatingNew is true)
   chemicalName: z.string().optional(),
   format: z.string().optional(),
   concentrationValue: z.string().optional(),
@@ -118,6 +125,112 @@ function canonicalUnitFromFormat(format?: string): string {
   }
 }
 
+function bytesToNiceSize(bytes?: number | null): string {
+  if (!bytes || bytes <= 0) return "";
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(1)} MB`;
+}
+
+function ImageCarousel({
+  title,
+  images,
+}: {
+  title: string;
+  images: StandardMedicationImageDTO[];
+}) {
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    setIdx(0);
+  }, [images?.length]);
+
+  if (!images || images.length === 0) {
+    return <div className="text-sm text-muted-foreground">No photos yet.</div>;
+  }
+
+  const safeIdx = Math.min(Math.max(idx, 0), images.length - 1);
+  const active = images[safeIdx];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="font-medium">{title}</div>
+          <div className="text-xs text-muted-foreground">
+            {images.length} photo{images.length === 1 ? "" : "s"}
+            {active?.purpose ? ` • ${active.purpose}` : ""}
+            {active?.sizeBytes ? ` • ${bytesToNiceSize(active.sizeBytes)}` : ""}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIdx((p) => Math.max(p - 1, 0))}
+            disabled={safeIdx <= 0}
+          >
+            Prev
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIdx((p) => Math.min(p + 1, images.length - 1))}
+            disabled={safeIdx >= images.length - 1}
+          >
+            Next
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => window.open(active.url, "_blank", "noopener,noreferrer")}
+          >
+            Open
+          </Button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border bg-white overflow-hidden">
+        <div className="w-full aspect-video bg-stone-50 flex items-center justify-center">
+          <img
+            src={active.url}
+            alt={active.originalFilename || active.purpose || "Medication image"}
+            className="max-h-full max-w-full object-contain"
+          />
+        </div>
+
+        <div className="border-t p-2 overflow-x-auto">
+          <div className="flex gap-2">
+            {images.map((img, i) => (
+              <button
+                key={img.id}
+                type="button"
+                onClick={() => setIdx(i)}
+                className={[
+                  "h-14 w-14 rounded-md overflow-hidden border",
+                  i === safeIdx ? "ring-2 ring-stone-400" : "hover:border-stone-400",
+                ].join(" ")}
+                title={img.purpose || img.originalFilename || "photo"}
+              >
+                <img
+                  src={img.url}
+                  alt={img.originalFilename || img.purpose || "thumb"}
+                  className="h-full w-full object-cover"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CreateMedicationPurchasePage() {
   const navigate = useNavigate();
   const { activeRanchId, loading: ranchLoading } = useRanch();
@@ -125,6 +238,10 @@ export default function CreateMedicationPurchasePage() {
   const [options, setOptions] = useState<ActiveMedicationOption[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [optionsError, setOptionsError] = useState<string | null>(null);
+
+  const [standardImages, setStandardImages] = useState<StandardMedicationImageDTO[]>([]);
+  const [loadingStandardImages, setLoadingStandardImages] = useState(false);
+  const [standardImagesError, setStandardImagesError] = useState<string | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(FormSchema),
@@ -176,7 +293,7 @@ export default function CreateMedicationPurchasePage() {
       setOptionsError(null);
       try {
         const res = await apiGet<{ medications: ActiveMedicationOption[] }>(
-          `/standard-medications/active?ranchId=${encodeURIComponent(activeRanchId)}`
+          `/standard-medications/active`
         );
         setOptions(res.medications ?? []);
       } catch (e: any) {
@@ -188,6 +305,51 @@ export default function CreateMedicationPurchasePage() {
 
     load();
   }, [activeRanchId]);
+
+  useEffect(() => {
+    if (!activeRanchId) return;
+
+    if (creatingNew) {
+      setStandardImages([]);
+      setStandardImagesError(null);
+      setLoadingStandardImages(false);
+      return;
+    }
+
+    if (!selectedStandardMedicationId) {
+      setStandardImages([]);
+      setStandardImagesError(null);
+      setLoadingStandardImages(false);
+      return;
+    }
+
+    let alive = true;
+
+    const loadImages = async () => {
+      setLoadingStandardImages(true);
+      setStandardImagesError(null);
+      try {
+        const res = await apiGet<{ images: StandardMedicationImageDTO[] }>(
+          `/standard-medications/${encodeURIComponent(selectedStandardMedicationId)}/images`
+        );
+        if (!alive) return;
+        setStandardImages(res.images ?? []);
+      } catch (e: any) {
+        if (!alive) return;
+        setStandardImages([]);
+        setStandardImagesError(e?.message || "Failed to load photos for this medication.");
+      } finally {
+        if (!alive) return;
+        setLoadingStandardImages(false);
+      }
+    };
+
+    loadImages();
+
+    return () => {
+      alive = false;
+    };
+  }, [activeRanchId, creatingNew, selectedStandardMedicationId]);
 
   const onSubmit: SubmitHandler<FormValues> = async (v) => {
     if (!activeRanchId) {
@@ -205,22 +367,12 @@ export default function CreateMedicationPurchasePage() {
       return;
     }
 
-    if (
-      parsed.totalPrice &&
-      parsed.totalPrice.trim().length > 0 &&
-      !isNumberString(parsed.totalPrice)
-    ) {
-      form.setError("totalPrice", {
-        type: "validate",
-        message: "Enter a number (e.g. 10 or 10.99)",
-      });
+    if (parsed.totalPrice && parsed.totalPrice.trim().length > 0 && !isNumberString(parsed.totalPrice)) {
+      form.setError("totalPrice", { type: "validate", message: "Enter a number (e.g. 10 or 10.99)" });
       return;
     }
 
-    if (
-      !creatingNew &&
-      (!parsed.standardMedicationId || parsed.standardMedicationId.trim().length === 0)
-    ) {
+    if (!creatingNew && (!parsed.standardMedicationId || parsed.standardMedicationId.trim().length === 0)) {
       form.setError("standardMedicationId", {
         type: "validate",
         message: "Choose a medication or click Add New Medication",
@@ -247,16 +399,10 @@ export default function CreateMedicationPurchasePage() {
       }
     }
 
-    // IMPORTANT:
-    // - For standard purchases: we DO NOT send purchaseUnit anymore.
-    //   Backend will derive a canonical unit from the medication format.
-    // - For createNewMedication purchases: backend will also derive unit from format.
     const payload: any = {
-      ranchId: activeRanchId,
       quantity: parsed.quantity.trim(),
       purchaseDate: parsed.purchaseDate,
-      totalPrice:
-        parsed.totalPrice && parsed.totalPrice.trim().length > 0 ? parsed.totalPrice.trim() : null,
+      totalPrice: parsed.totalPrice && parsed.totalPrice.trim().length > 0 ? parsed.totalPrice.trim() : null,
       supplierName: parsed.supplierName.trim(),
     };
 
@@ -317,8 +463,13 @@ export default function CreateMedicationPurchasePage() {
       </div>
 
       {!ranchLoading && !activeRanchId && (
-        <Card title="No Ranch Selected">
-          <div className="text-sm text-stone-700">Select a ranch to record purchases.</div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">No Ranch Selected</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-stone-700">
+            Select a ranch to record purchases.
+          </CardContent>
         </Card>
       )}
 
@@ -327,8 +478,8 @@ export default function CreateMedicationPurchasePage() {
           <CardHeader>
             <CardTitle className="text-base">Purchase Details</CardTitle>
           </CardHeader>
+
           <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Medication choice */}
             <div className="space-y-2 md:col-span-2">
               <div className="flex items-center justify-between gap-3">
                 <Label htmlFor="standardMedicationId">Medication</Label>
@@ -353,6 +504,8 @@ export default function CreateMedicationPurchasePage() {
 
                   <select
                     id="standardMedicationId"
+                    aria-label="Medication"
+                    title="Medication"
                     className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
                     disabled={!canInteract || loadingOptions}
                     value={form.getValues("standardMedicationId") || ""}
@@ -376,8 +529,8 @@ export default function CreateMedicationPurchasePage() {
 
                   {selectedOption && (
                     <p className="text-xs text-muted-foreground">
-                      Unit will be recorded as <span className="font-medium">{derivedUnitForStandard}</span>{" "}
-                      based on the medication format.
+                      Unit will be recorded as{" "}
+                      <span className="font-medium">{derivedUnitForStandard}</span> based on the medication format.
                     </p>
                   )}
 
@@ -388,7 +541,6 @@ export default function CreateMedicationPurchasePage() {
               )}
             </div>
 
-            {/* Quantity */}
             <div className="space-y-2">
               <Label htmlFor="quantity">Quantity</Label>
               <Input id="quantity" placeholder="200" {...form.register("quantity")} disabled={!canInteract} />
@@ -397,7 +549,6 @@ export default function CreateMedicationPurchasePage() {
               )}
             </div>
 
-            {/* Price */}
             <div className="space-y-2">
               <Label htmlFor="totalPrice">Total price (optional)</Label>
               <Input id="totalPrice" placeholder="10.99" {...form.register("totalPrice")} disabled={!canInteract} />
@@ -406,7 +557,6 @@ export default function CreateMedicationPurchasePage() {
               )}
             </div>
 
-            {/* Date */}
             <div className="space-y-2">
               <Label htmlFor="purchaseDate">Purchase date</Label>
               <Input id="purchaseDate" type="date" {...form.register("purchaseDate")} disabled={!canInteract} />
@@ -415,7 +565,6 @@ export default function CreateMedicationPurchasePage() {
               )}
             </div>
 
-            {/* Supplier */}
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="supplierName">Supplier</Label>
               <Input
@@ -434,13 +583,13 @@ export default function CreateMedicationPurchasePage() {
           </CardContent>
         </Card>
 
-        {/* Create-new subpanel */}
         {creatingNew && (
           <div className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">New Medication</CardTitle>
               </CardHeader>
+
               <CardContent className="space-y-3">
                 <div className="text-sm">
                   <div className="font-medium">{newMedPreview}</div>
@@ -459,9 +608,11 @@ export default function CreateMedicationPurchasePage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="format">Format</Label>
+                    <Label htmlFor="formatSelect">Format</Label>
                     <select
-                      id="format"
+                      id="formatSelect"
+                      aria-label="Medication format"
+                      title="Medication format"
                       className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
                       disabled={!canInteract}
                       value={form.getValues("format") || "pill"}
@@ -476,19 +627,13 @@ export default function CreateMedicationPurchasePage() {
                     {form.formState.errors.format?.message && (
                       <p className="text-sm text-red-600">{form.formState.errors.format.message}</p>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                      Purchases for this medication will record unit as{" "}
-                      <span className="font-medium">{canonicalUnitFromFormat(form.getValues("format"))}</span>.
-                    </p>
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="manufacturerName">Manufacturer</Label>
                     <Input id="manufacturerName" {...form.register("manufacturerName")} disabled={!canInteract} />
                     {form.formState.errors.manufacturerName?.message && (
-                      <p className="text-sm text-red-600">
-                        {form.formState.errors.manufacturerName.message}
-                      </p>
+                      <p className="text-sm text-red-600">{form.formState.errors.manufacturerName.message}</p>
                     )}
                   </div>
 
@@ -506,9 +651,11 @@ export default function CreateMedicationPurchasePage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="concentrationUnit">Concentration unit (optional)</Label>
+                    <Label htmlFor="concentrationUnitSelect">Concentration unit (optional)</Label>
                     <select
-                      id="concentrationUnit"
+                      id="concentrationUnitSelect"
+                      aria-label="Concentration unit"
+                      title="Concentration unit"
                       className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
                       disabled={!canInteract}
                       value={form.getValues("concentrationUnit") || "mg"}
@@ -538,11 +685,6 @@ export default function CreateMedicationPurchasePage() {
                 <div className="space-y-2">
                   <Label htmlFor="standardStartDate">Start date</Label>
                   <Input id="standardStartDate" type="date" {...form.register("standardStartDate")} disabled={!canInteract} />
-                  {form.formState.errors.standardStartDate?.message && (
-                    <p className="text-sm text-red-600">
-                      {form.formState.errors.standardStartDate.message}
-                    </p>
-                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -550,7 +692,7 @@ export default function CreateMedicationPurchasePage() {
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(form.getValues("usesOffLabel"))}
-                      onCheckedChange={(v) => form.setValue("usesOffLabel", Boolean(v))}
+                      onCheckedChange={(val) => form.setValue("usesOffLabel", Boolean(val))}
                       disabled={!canInteract}
                     />
                     <span className="text-sm">We use off-label dosing practices</span>
@@ -560,15 +702,35 @@ export default function CreateMedicationPurchasePage() {
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="standardDoseText">Ranch standard dosing</Label>
                   <Textarea id="standardDoseText" rows={5} {...form.register("standardDoseText")} disabled={!canInteract} />
-                  {form.formState.errors.standardDoseText?.message && (
-                    <p className="text-sm text-red-600">
-                      {form.formState.errors.standardDoseText.message}
-                    </p>
-                  )}
                 </div>
               </CardContent>
             </Card>
           </div>
+        )}
+
+        {!creatingNew && selectedStandardMedicationId && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Medication Photos</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {loadingStandardImages && (
+                <div className="text-sm text-muted-foreground">Loading photos…</div>
+              )}
+
+              {!loadingStandardImages && standardImagesError && (
+                <div className="text-sm text-red-600">{standardImagesError}</div>
+              )}
+
+              {!loadingStandardImages && !standardImagesError && (
+                <ImageCarousel title="Standard reference photos" images={standardImages} />
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                Tip: photos help confirm you’re selecting the right product.
+              </p>
+            </CardContent>
+          </Card>
         )}
 
         <div className="flex items-center justify-end gap-3">
