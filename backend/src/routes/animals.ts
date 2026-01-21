@@ -1,7 +1,7 @@
 // backend/src/routes/animals.ts
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 import { db } from "../db";
@@ -18,7 +18,22 @@ import { requireAuth } from "../plugins/requireAuth";
  * Helpers
  * ------------------------------------------------------------------------------------------------ */
 
-async function requireHerdWithRanchAccess(userId: string, herdId: string): Promise<{ herdId: string; ranchId: string }> {
+async function getActiveRanchId(userId: string): Promise<string | null> {
+  // Matches existing backend convention used in medications routes:
+  // pick the first ranch membership row.
+  const rows = await db
+    .select({ ranchId: userRanches.ranchId })
+    .from(userRanches)
+    .where(eq(userRanches.userId, userId))
+    .limit(1);
+
+  return rows[0]?.ranchId ?? null;
+}
+
+async function requireHerdWithRanchAccess(
+  userId: string,
+  herdId: string
+): Promise<{ herdId: string; ranchId: string }> {
   const herdRows = await db
     .select({ herdId: herds.id, ranchId: herds.ranchId })
     .from(herds)
@@ -27,7 +42,6 @@ async function requireHerdWithRanchAccess(userId: string, herdId: string): Promi
 
   const herdRow = herdRows[0];
   if (!herdRow) {
-    // Herd doesn't exist
     throw Object.assign(new Error("Herd not found"), { statusCode: 404 });
   }
 
@@ -38,7 +52,6 @@ async function requireHerdWithRanchAccess(userId: string, herdId: string): Promi
     .limit(1);
 
   if (!accessRows[0]) {
-    // User has no membership in this herd's ranch => cross-ranch denial
     throw Object.assign(new Error("Forbidden: no access to this ranch"), { statusCode: 403 });
   }
 
@@ -107,11 +120,95 @@ const PurchaseIntakeSchema = BaseAnimalSchema.extend({
   }),
 });
 
+const ListAnimalsQuerySchema = z.object({
+  herdId: z.string().optional(),
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Routes
  * ------------------------------------------------------------------------------------------------ */
 
 export async function animalsRoutes(app: FastifyInstance) {
+  /**
+   * GET /api/animals
+   *
+   * Lists animals for the user's "active" ranch (first user_ranches row),
+   * based on CURRENT herd membership (end_at is null).
+   *
+   * Optional:
+   * - ?herdId=<uuid> to filter to a specific herd (must be in a ranch you can access).
+   */
+  app.get("/animals", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const parsed = ListAnimalsQuerySchema.safeParse(req.query ?? {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid query", details: parsed.error.flatten() });
+      }
+
+      const { herdId } = parsed.data;
+
+      // Determine ranch scope in the same way existing routes do.
+      const ranchId = await getActiveRanchId(req.auth!.userId);
+      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+
+      if (herdId) {
+        // Validate herd is within a ranch this user can access.
+        // (Also prevents cross-ranch probing by herdId)
+        const herdAccess = await requireHerdWithRanchAccess(req.auth!.userId, herdId);
+
+        // If the herd is not in the user's "active" ranch, be explicit:
+        if (herdAccess.ranchId !== ranchId) {
+          return reply.status(400).send({
+            error: "Herd is not in the active ranch",
+            message:
+              "This backend currently uses your first ranch membership as the active ranch. Switch ranch support can be added later.",
+          });
+        }
+      }
+
+      const rows = await db
+        .select({
+          animalId: animals.id,
+          species: animals.species,
+          breed: animals.breed,
+          sex: animals.sex,
+          birthDate: animals.birthDate,
+          birthDateIsEstimated: animals.birthDateIsEstimated,
+          tagNumber: animals.tagNumber,
+          tagColor: animals.tagColor,
+          tagEar: animals.tagEar,
+          status: animals.status,
+          neutered: animals.neutered,
+          neuteredDate: animals.neuteredDate,
+          notes: animals.notes,
+          createdAt: animals.createdAt,
+          updatedAt: animals.updatedAt,
+
+          herdId: herds.id,
+          herdName: herds.name,
+        })
+        .from(animalHerdMembership)
+        .innerJoin(herds, eq(animalHerdMembership.herdId, herds.id))
+        .innerJoin(animals, eq(animalHerdMembership.animalId, animals.id))
+        .where(
+          and(
+            eq(herds.ranchId, ranchId),
+            isNull(animalHerdMembership.endAt),
+            herdId ? eq(herds.id, herdId) : undefined
+          )
+        )
+        .orderBy(desc(animals.createdAt));
+
+      return reply.send({
+        ranchId,
+        herdId: herdId ?? null,
+        animals: rows,
+      });
+    } catch (err: any) {
+      return sendError(reply, err);
+    }
+  });
+
   /**
    * POST /api/animals/intake/birth
    *
@@ -128,7 +225,6 @@ export async function animalsRoutes(app: FastifyInstance) {
       }
 
       const data = parsed.data;
-
       const { herdId, ranchId } = await requireHerdWithRanchAccess(req.auth!.userId, data.herdId);
 
       const animalId = uuid();
@@ -225,7 +321,6 @@ export async function animalsRoutes(app: FastifyInstance) {
       }
 
       const data = parsed.data;
-
       const { herdId, ranchId } = await requireHerdWithRanchAccess(req.auth!.userId, data.herdId);
 
       const animalId = uuid();
