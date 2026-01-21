@@ -103,9 +103,7 @@ function buildNewMedPreview(v: Partial<FormValues>) {
   const brand = v.brandName?.trim() || "Brand";
   const fmt = v.format?.trim() || "format";
   const conc =
-    v.concentrationValue && v.concentrationUnit
-      ? ` ${v.concentrationValue}${v.concentrationUnit}`
-      : "";
+    v.concentrationValue && v.concentrationUnit ? ` ${v.concentrationValue}${v.concentrationUnit}` : "";
   return `${brand} — ${chem}${conc} (${fmt})`;
 }
 
@@ -133,6 +131,27 @@ function bytesToNiceSize(bytes?: number | null): string {
   return `${mb.toFixed(1)} MB`;
 }
 
+/**
+ * Standard image URLs coming back from the backend are often "/images/...".
+ * If we render those directly in the Vite dev server, the browser requests
+ * http://localhost:5173/images/... and images break.
+ *
+ * We resolve relative /images paths against VITE_API_BASE_URL (if present),
+ * otherwise we leave them as-is (works when frontend is served by backend).
+ */
+const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined) || "";
+
+function resolveBackendUrl(url: string): string {
+  if (!url) return url;
+  const trimmed = url.trim();
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  if (!trimmed.startsWith("/")) return trimmed;
+
+  const base = API_BASE_URL.trim().replace(/\/+$/, "");
+  return base ? `${base}${trimmed}` : trimmed;
+}
+
 function ImageCarousel({
   title,
   images,
@@ -152,6 +171,7 @@ function ImageCarousel({
 
   const safeIdx = Math.min(Math.max(idx, 0), images.length - 1);
   const active = images[safeIdx];
+  const activeUrl = resolveBackendUrl(active.url);
 
   return (
     <div className="space-y-3">
@@ -188,7 +208,7 @@ function ImageCarousel({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => window.open(active.url, "_blank", "noopener,noreferrer")}
+            onClick={() => window.open(activeUrl, "_blank", "noopener,noreferrer")}
           >
             Open
           </Button>
@@ -198,7 +218,7 @@ function ImageCarousel({
       <div className="rounded-lg border bg-white overflow-hidden">
         <div className="w-full aspect-video bg-stone-50 flex items-center justify-center">
           <img
-            src={active.url}
+            src={activeUrl}
             alt={active.originalFilename || active.purpose || "Medication image"}
             className="max-h-full max-w-full object-contain"
           />
@@ -206,24 +226,27 @@ function ImageCarousel({
 
         <div className="border-t p-2 overflow-x-auto">
           <div className="flex gap-2">
-            {images.map((img, i) => (
-              <button
-                key={img.id}
-                type="button"
-                onClick={() => setIdx(i)}
-                className={[
-                  "h-14 w-14 rounded-md overflow-hidden border",
-                  i === safeIdx ? "ring-2 ring-stone-400" : "hover:border-stone-400",
-                ].join(" ")}
-                title={img.purpose || img.originalFilename || "photo"}
-              >
-                <img
-                  src={img.url}
-                  alt={img.originalFilename || img.purpose || "thumb"}
-                  className="h-full w-full object-cover"
-                />
-              </button>
-            ))}
+            {images.map((img, i) => {
+              const thumbUrl = resolveBackendUrl(img.url);
+              return (
+                <button
+                  key={img.id}
+                  type="button"
+                  onClick={() => setIdx(i)}
+                  className={[
+                    "h-14 w-14 rounded-md overflow-hidden border",
+                    i === safeIdx ? "ring-2 ring-stone-400" : "hover:border-stone-400",
+                  ].join(" ")}
+                  title={img.purpose || img.originalFilename || "photo"}
+                >
+                  <img
+                    src={thumbUrl}
+                    alt={img.originalFilename || img.purpose || "thumb"}
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -271,10 +294,7 @@ export default function CreateMedicationPurchasePage() {
   const selectedStandardMedicationId = form.watch("standardMedicationId") || "";
   const newMedPreview = useMemo(() => buildNewMedPreview(form.watch()), [form]);
 
-  const canInteract = useMemo(
-    () => !ranchLoading && !!activeRanchId,
-    [ranchLoading, activeRanchId]
-  );
+  const canInteract = useMemo(() => !ranchLoading && !!activeRanchId, [ranchLoading, activeRanchId]);
 
   const selectedOption = useMemo(() => {
     if (!selectedStandardMedicationId) return null;
@@ -292,9 +312,7 @@ export default function CreateMedicationPurchasePage() {
       setLoadingOptions(true);
       setOptionsError(null);
       try {
-        const res = await apiGet<{ medications: ActiveMedicationOption[] }>(
-          `/standard-medications/active`
-        );
+        const res = await apiGet<{ medications: ActiveMedicationOption[] }>(`/standard-medications/active`);
         setOptions(res.medications ?? []);
       } catch (e: any) {
         setOptionsError(e?.message || "Failed to load medications");
@@ -427,9 +445,7 @@ export default function CreateMedicationPurchasePage() {
         manufacturerName: parsed.manufacturerName!.trim(),
         brandName: parsed.brandName!.trim(),
         onLabelDoseText:
-          parsed.onLabelDoseText && parsed.onLabelDoseText.trim().length > 0
-            ? parsed.onLabelDoseText.trim()
-            : null,
+          parsed.onLabelDoseText && parsed.onLabelDoseText.trim().length > 0 ? parsed.onLabelDoseText.trim() : null,
         standard: {
           usesOffLabel: Boolean(parsed.usesOffLabel),
           standardDoseText: parsed.standardDoseText!.trim(),
@@ -467,9 +483,7 @@ export default function CreateMedicationPurchasePage() {
           <CardHeader>
             <CardTitle className="text-base">No Ranch Selected</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-stone-700">
-            Select a ranch to record purchases.
-          </CardContent>
+          <CardContent className="text-sm text-stone-700">Select a ranch to record purchases.</CardContent>
         </Card>
       )}
 
@@ -509,9 +523,7 @@ export default function CreateMedicationPurchasePage() {
                     className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
                     disabled={!canInteract || loadingOptions}
                     value={form.getValues("standardMedicationId") || ""}
-                    onChange={(e) =>
-                      form.setValue("standardMedicationId", e.target.value, { shouldValidate: true })
-                    }
+                    onChange={(e) => form.setValue("standardMedicationId", e.target.value, { shouldValidate: true })}
                   >
                     <option value="">{loadingOptions ? "Loading…" : "Select a medication…"}</option>
                     {options.map((m) => (
@@ -522,9 +534,7 @@ export default function CreateMedicationPurchasePage() {
                   </select>
 
                   {form.formState.errors.standardMedicationId?.message && (
-                    <p className="text-sm text-red-600">
-                      {form.formState.errors.standardMedicationId.message}
-                    </p>
+                    <p className="text-sm text-red-600">{form.formState.errors.standardMedicationId.message}</p>
                   )}
 
                   {selectedOption && (
@@ -576,9 +586,7 @@ export default function CreateMedicationPurchasePage() {
               {form.formState.errors.supplierName?.message && (
                 <p className="text-sm text-red-600">{form.formState.errors.supplierName.message}</p>
               )}
-              <p className="text-xs text-muted-foreground">
-                Supplier will be upserted for spend reporting later.
-              </p>
+              <p className="text-xs text-muted-foreground">Supplier will be upserted for spend reporting later.</p>
             </div>
           </CardContent>
         </Card>
@@ -593,9 +601,7 @@ export default function CreateMedicationPurchasePage() {
               <CardContent className="space-y-3">
                 <div className="text-sm">
                   <div className="font-medium">{newMedPreview}</div>
-                  <div className="text-muted-foreground">
-                    This will be saved as a standard medication and used for this purchase.
-                  </div>
+                  <div className="text-muted-foreground">This will be saved as a standard medication and used for this purchase.</div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -714,9 +720,7 @@ export default function CreateMedicationPurchasePage() {
               <CardTitle className="text-base">Medication Photos</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {loadingStandardImages && (
-                <div className="text-sm text-muted-foreground">Loading photos…</div>
-              )}
+              {loadingStandardImages && <div className="text-sm text-muted-foreground">Loading photos…</div>}
 
               {!loadingStandardImages && standardImagesError && (
                 <div className="text-sm text-red-600">{standardImagesError}</div>
@@ -726,9 +730,7 @@ export default function CreateMedicationPurchasePage() {
                 <ImageCarousel title="Standard reference photos" images={standardImages} />
               )}
 
-              <p className="text-xs text-muted-foreground">
-                Tip: photos help confirm you’re selecting the right product.
-              </p>
+              <p className="text-xs text-muted-foreground">Tip: photos help confirm you’re selecting the right product.</p>
             </CardContent>
           </Card>
         )}
