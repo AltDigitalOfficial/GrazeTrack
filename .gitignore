@@ -23,6 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
+# Local uploaded images / runtime storage
+images/
+
+
 # Secrets and sensitive files
 secrets/
 backend/secrets/

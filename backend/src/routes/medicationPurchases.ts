@@ -52,6 +52,24 @@ async function parseMultipartRequest(req: any): Promise<{
   const contentType = String(req.headers?.["content-type"] ?? "");
   const isMultipart = contentType.includes("multipart/form-data");
 
+  // ✅ Fix: for multipart, read parts from the stream. req.body is often empty unless
+  // fastify-multipart is configured with attachFieldsToBody.
+  if (isMultipart && typeof req.parts === "function") {
+    const body: Record<string, any> = {};
+    const files: any[] = [];
+
+    for await (const part of req.parts()) {
+      if (part.type === "file") {
+        files.push(part);
+      } else {
+        body[part.fieldname] = part.value;
+      }
+    }
+
+    return { body, files };
+  }
+
+  // Fallback for setups that write temp files and populate req.body
   if (isMultipart && typeof req.saveRequestFiles === "function") {
     const files = await req.saveRequestFiles();
     return { body: (req.body ?? {}) as Record<string, any>, files };

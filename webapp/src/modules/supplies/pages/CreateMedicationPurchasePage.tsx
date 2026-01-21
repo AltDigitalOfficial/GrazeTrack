@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "react-router-dom";
 
 import { ROUTES } from "@/routes";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, apiPostForm } from "@/lib/api";
 import { useRanch } from "@/lib/ranchContext";
 
 import { Button } from "@/components/ui/button";
@@ -103,7 +103,9 @@ function buildNewMedPreview(v: Partial<FormValues>) {
   const brand = v.brandName?.trim() || "Brand";
   const fmt = v.format?.trim() || "format";
   const conc =
-    v.concentrationValue && v.concentrationUnit ? ` ${v.concentrationValue}${v.concentrationUnit}` : "";
+    v.concentrationValue && v.concentrationUnit
+      ? ` ${v.concentrationValue}${v.concentrationUnit}`
+      : "";
   return `${brand} — ${chem}${conc} (${fmt})`;
 }
 
@@ -131,26 +133,142 @@ function bytesToNiceSize(bytes?: number | null): string {
   return `${mb.toFixed(1)} MB`;
 }
 
-/**
- * Standard image URLs coming back from the backend are often "/images/...".
- * If we render those directly in the Vite dev server, the browser requests
- * http://localhost:5173/images/... and images break.
- *
- * We resolve relative /images paths against VITE_API_BASE_URL (if present),
- * otherwise we leave them as-is (works when frontend is served by backend).
- */
-const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL as string | undefined) || "";
+/* ------------------------------------------------------------------------------------------------
+ * Purchase images (local selection)
+ * ------------------------------------------------------------------------------------------------ */
 
-function resolveBackendUrl(url: string): string {
-  if (!url) return url;
-  const trimmed = url.trim();
+const PurchaseImagePurposeSchema = z.enum(["receipt", "label", "packaging", "misc"]);
+type PurchaseImagePurpose = z.infer<typeof PurchaseImagePurposeSchema>;
 
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
-  if (!trimmed.startsWith("/")) return trimmed;
+type LocalImage = {
+  id: string;
+  file: File;
+  url: string;
+  originalName: string;
+  mimeType?: string;
+  sizeBytes?: number;
+};
 
-  const base = API_BASE_URL.trim().replace(/\/+$/, "");
-  return base ? `${base}${trimmed}` : trimmed;
+function nicePurchasePurposeLabel(purpose: PurchaseImagePurpose): string {
+  switch (purpose) {
+    case "receipt":
+      return "Receipt photos";
+    case "label":
+      return "Label photos";
+    case "packaging":
+      return "Packaging photos";
+    case "misc":
+      return "Misc photos";
+    default:
+      return "Photos";
+  }
 }
+
+function LocalImageCarousel({
+  title,
+  images,
+  onRemove,
+}: {
+  title: string;
+  images: LocalImage[];
+  onRemove: (id: string) => void;
+}) {
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    setIdx(0);
+  }, [images?.length]);
+
+  if (!images || images.length === 0) {
+    return <div className="text-sm text-muted-foreground">No photos selected.</div>;
+  }
+
+  const safeIdx = Math.min(Math.max(idx, 0), images.length - 1);
+  const active = images[safeIdx];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">{title}</div>
+          <div className="text-xs text-muted-foreground">
+            {images.length} photo{images.length === 1 ? "" : "s"}
+            {active?.sizeBytes ? ` • ${bytesToNiceSize(active.sizeBytes)}` : ""}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIdx((p) => Math.max(p - 1, 0))}
+            disabled={safeIdx <= 0}
+          >
+            Prev
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIdx((p) => Math.min(p + 1, images.length - 1))}
+            disabled={safeIdx >= images.length - 1}
+          >
+            Next
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => window.open(active.url, "_blank", "noopener,noreferrer")}
+          >
+            Open
+          </Button>
+          <Button type="button" variant="destructive" size="sm" onClick={() => onRemove(active.id)}>
+            Remove
+          </Button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border bg-white overflow-hidden">
+        <div className="w-full aspect-video bg-stone-50 flex items-center justify-center">
+          <img
+            src={active.url}
+            alt={active.originalName || "Purchase image"}
+            className="max-h-full max-w-full object-contain"
+          />
+        </div>
+
+        <div className="border-t p-2 overflow-x-auto">
+          <div className="flex gap-2">
+            {images.map((img, i) => (
+              <button
+                key={img.id}
+                type="button"
+                onClick={() => setIdx(i)}
+                className={[
+                  "h-14 w-14 rounded-md overflow-hidden border",
+                  i === safeIdx ? "ring-2 ring-stone-400" : "hover:border-stone-400",
+                ].join(" ")}
+                title={img.originalName || "photo"}
+              >
+                <img
+                  src={img.url}
+                  alt={img.originalName || "thumb"}
+                  className="h-full w-full object-cover"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Standard images viewer (already persisted)
+ * ------------------------------------------------------------------------------------------------ */
 
 function ImageCarousel({
   title,
@@ -171,7 +289,6 @@ function ImageCarousel({
 
   const safeIdx = Math.min(Math.max(idx, 0), images.length - 1);
   const active = images[safeIdx];
-  const activeUrl = resolveBackendUrl(active.url);
 
   return (
     <div className="space-y-3">
@@ -208,7 +325,7 @@ function ImageCarousel({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => window.open(activeUrl, "_blank", "noopener,noreferrer")}
+            onClick={() => window.open(active.url, "_blank", "noopener,noreferrer")}
           >
             Open
           </Button>
@@ -218,7 +335,7 @@ function ImageCarousel({
       <div className="rounded-lg border bg-white overflow-hidden">
         <div className="w-full aspect-video bg-stone-50 flex items-center justify-center">
           <img
-            src={activeUrl}
+            src={active.url}
             alt={active.originalFilename || active.purpose || "Medication image"}
             className="max-h-full max-w-full object-contain"
           />
@@ -226,33 +343,34 @@ function ImageCarousel({
 
         <div className="border-t p-2 overflow-x-auto">
           <div className="flex gap-2">
-            {images.map((img, i) => {
-              const thumbUrl = resolveBackendUrl(img.url);
-              return (
-                <button
-                  key={img.id}
-                  type="button"
-                  onClick={() => setIdx(i)}
-                  className={[
-                    "h-14 w-14 rounded-md overflow-hidden border",
-                    i === safeIdx ? "ring-2 ring-stone-400" : "hover:border-stone-400",
-                  ].join(" ")}
-                  title={img.purpose || img.originalFilename || "photo"}
-                >
-                  <img
-                    src={thumbUrl}
-                    alt={img.originalFilename || img.purpose || "thumb"}
-                    className="h-full w-full object-cover"
-                  />
-                </button>
-              );
-            })}
+            {images.map((img, i) => (
+              <button
+                key={img.id}
+                type="button"
+                onClick={() => setIdx(i)}
+                className={[
+                  "h-14 w-14 rounded-md overflow-hidden border",
+                  i === safeIdx ? "ring-2 ring-stone-400" : "hover:border-stone-400",
+                ].join(" ")}
+                title={img.purpose || img.originalFilename || "photo"}
+              >
+                <img
+                  src={img.url}
+                  alt={img.originalFilename || img.purpose || "thumb"}
+                  className="h-full w-full object-cover"
+                />
+              </button>
+            ))}
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Page
+ * ------------------------------------------------------------------------------------------------ */
 
 export default function CreateMedicationPurchasePage() {
   const navigate = useNavigate();
@@ -265,6 +383,15 @@ export default function CreateMedicationPurchasePage() {
   const [standardImages, setStandardImages] = useState<StandardMedicationImageDTO[]>([]);
   const [loadingStandardImages, setLoadingStandardImages] = useState(false);
   const [standardImagesError, setStandardImagesError] = useState<string | null>(null);
+
+  const [purchaseImagesByPurpose, setPurchaseImagesByPurpose] = useState<
+    Record<PurchaseImagePurpose, LocalImage[]>
+  >({
+    receipt: [],
+    label: [],
+    packaging: [],
+    misc: [],
+  });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(FormSchema),
@@ -294,7 +421,10 @@ export default function CreateMedicationPurchasePage() {
   const selectedStandardMedicationId = form.watch("standardMedicationId") || "";
   const newMedPreview = useMemo(() => buildNewMedPreview(form.watch()), [form]);
 
-  const canInteract = useMemo(() => !ranchLoading && !!activeRanchId, [ranchLoading, activeRanchId]);
+  const canInteract = useMemo(
+    () => !ranchLoading && !!activeRanchId,
+    [ranchLoading, activeRanchId]
+  );
 
   const selectedOption = useMemo(() => {
     if (!selectedStandardMedicationId) return null;
@@ -305,6 +435,44 @@ export default function CreateMedicationPurchasePage() {
     return canonicalUnitFromFormat(selectedOption?.format);
   }, [selectedOption?.format]);
 
+  const totalPurchaseImages = useMemo(() => {
+    return Object.values(purchaseImagesByPurpose).reduce((sum, arr) => sum + (arr?.length ?? 0), 0);
+  }, [purchaseImagesByPurpose]);
+
+  function addPurchaseImages(purpose: PurchaseImagePurpose, fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+
+    const next: LocalImage[] = [];
+    for (const file of Array.from(fileList)) {
+      const id = crypto.randomUUID();
+      next.push({
+        id,
+        file,
+        url: URL.createObjectURL(file),
+        originalName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+      });
+    }
+
+    setPurchaseImagesByPurpose((prev) => ({
+      ...prev,
+      [purpose]: [...prev[purpose], ...next],
+    }));
+  }
+
+  function removePurchaseImage(purpose: PurchaseImagePurpose, id: string) {
+    setPurchaseImagesByPurpose((prev) => {
+      const img = prev[purpose].find((x) => x.id === id);
+      if (img?.url) URL.revokeObjectURL(img.url);
+
+      return {
+        ...prev,
+        [purpose]: prev[purpose].filter((x) => x.id !== id),
+      };
+    });
+  }
+
   useEffect(() => {
     if (!activeRanchId) return;
 
@@ -312,7 +480,9 @@ export default function CreateMedicationPurchasePage() {
       setLoadingOptions(true);
       setOptionsError(null);
       try {
-        const res = await apiGet<{ medications: ActiveMedicationOption[] }>(`/standard-medications/active`);
+        const res = await apiGet<{ medications: ActiveMedicationOption[] }>(
+          `/standard-medications/active`
+        );
         setOptions(res.medications ?? []);
       } catch (e: any) {
         setOptionsError(e?.message || "Failed to load medications");
@@ -417,7 +587,8 @@ export default function CreateMedicationPurchasePage() {
       }
     }
 
-    const payload: any = {
+    // Base payload fields (we’ll use these for both JSON and multipart)
+    const basePayload: any = {
       quantity: parsed.quantity.trim(),
       purchaseDate: parsed.purchaseDate,
       totalPrice: parsed.totalPrice && parsed.totalPrice.trim().length > 0 ? parsed.totalPrice.trim() : null,
@@ -425,7 +596,7 @@ export default function CreateMedicationPurchasePage() {
     };
 
     if (!creatingNew) {
-      payload.standardMedicationId = parsed.standardMedicationId;
+      basePayload.standardMedicationId = parsed.standardMedicationId;
     } else {
       const concentrationValue =
         parsed.concentrationValue && parsed.concentrationValue.trim().length > 0
@@ -437,7 +608,7 @@ export default function CreateMedicationPurchasePage() {
           ? parsed.concentrationUnit.trim()
           : null;
 
-      payload.createNewMedication = {
+      basePayload.createNewMedication = {
         chemicalName: parsed.chemicalName!.trim(),
         format: parsed.format!.trim(),
         concentrationValue,
@@ -445,7 +616,9 @@ export default function CreateMedicationPurchasePage() {
         manufacturerName: parsed.manufacturerName!.trim(),
         brandName: parsed.brandName!.trim(),
         onLabelDoseText:
-          parsed.onLabelDoseText && parsed.onLabelDoseText.trim().length > 0 ? parsed.onLabelDoseText.trim() : null,
+          parsed.onLabelDoseText && parsed.onLabelDoseText.trim().length > 0
+            ? parsed.onLabelDoseText.trim()
+            : null,
         standard: {
           usesOffLabel: Boolean(parsed.usesOffLabel),
           standardDoseText: parsed.standardDoseText!.trim(),
@@ -455,13 +628,51 @@ export default function CreateMedicationPurchasePage() {
     }
 
     try {
-      await apiPost("/medication-purchases", payload);
+      // If no purchase images selected, keep the simpler JSON request.
+      if (totalPurchaseImages === 0) {
+        await apiPost("/medication-purchases", basePayload);
+        navigate(ROUTES.supplies.medications);
+        return;
+      }
+
+      // Multipart submit (purchase fields + optional createNewMedication JSON + images)
+      const fd = new FormData();
+      fd.append("quantity", basePayload.quantity);
+      fd.append("purchaseDate", basePayload.purchaseDate);
+      if (basePayload.totalPrice != null) fd.append("totalPrice", String(basePayload.totalPrice));
+      fd.append("supplierName", basePayload.supplierName);
+
+      if (basePayload.standardMedicationId) {
+        fd.append("standardMedicationId", basePayload.standardMedicationId);
+      }
+      if (basePayload.createNewMedication) {
+        fd.append("createNewMedication", JSON.stringify(basePayload.createNewMedication));
+      }
+
+      for (const img of purchaseImagesByPurpose.receipt) fd.append("receipt", img.file, img.originalName);
+      for (const img of purchaseImagesByPurpose.label) fd.append("label", img.file, img.originalName);
+      for (const img of purchaseImagesByPurpose.packaging) fd.append("packaging", img.file, img.originalName);
+      for (const img of purchaseImagesByPurpose.misc) fd.append("misc", img.file, img.originalName);
+
+      await apiPostForm("/medication-purchases", fd);
       navigate(ROUTES.supplies.medications);
     } catch (e: any) {
       const msg = e?.message || e?.response?.data?.error || "Failed to record purchase";
       form.setError("quantity", { type: "server", message: msg });
     }
   };
+
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      for (const arr of Object.values(purchaseImagesByPurpose)) {
+        for (const img of arr) {
+          if (img.url) URL.revokeObjectURL(img.url);
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -483,7 +694,9 @@ export default function CreateMedicationPurchasePage() {
           <CardHeader>
             <CardTitle className="text-base">No Ranch Selected</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-stone-700">Select a ranch to record purchases.</CardContent>
+          <CardContent className="text-sm text-stone-700">
+            Select a ranch to record purchases.
+          </CardContent>
         </Card>
       )}
 
@@ -523,7 +736,9 @@ export default function CreateMedicationPurchasePage() {
                     className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
                     disabled={!canInteract || loadingOptions}
                     value={form.getValues("standardMedicationId") || ""}
-                    onChange={(e) => form.setValue("standardMedicationId", e.target.value, { shouldValidate: true })}
+                    onChange={(e) =>
+                      form.setValue("standardMedicationId", e.target.value, { shouldValidate: true })
+                    }
                   >
                     <option value="">{loadingOptions ? "Loading…" : "Select a medication…"}</option>
                     {options.map((m) => (
@@ -534,7 +749,9 @@ export default function CreateMedicationPurchasePage() {
                   </select>
 
                   {form.formState.errors.standardMedicationId?.message && (
-                    <p className="text-sm text-red-600">{form.formState.errors.standardMedicationId.message}</p>
+                    <p className="text-sm text-red-600">
+                      {form.formState.errors.standardMedicationId.message}
+                    </p>
                   )}
 
                   {selectedOption && (
@@ -586,7 +803,9 @@ export default function CreateMedicationPurchasePage() {
               {form.formState.errors.supplierName?.message && (
                 <p className="text-sm text-red-600">{form.formState.errors.supplierName.message}</p>
               )}
-              <p className="text-xs text-muted-foreground">Supplier will be upserted for spend reporting later.</p>
+              <p className="text-xs text-muted-foreground">
+                Supplier will be upserted for spend reporting later.
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -601,7 +820,9 @@ export default function CreateMedicationPurchasePage() {
               <CardContent className="space-y-3">
                 <div className="text-sm">
                   <div className="font-medium">{newMedPreview}</div>
-                  <div className="text-muted-foreground">This will be saved as a standard medication and used for this purchase.</div>
+                  <div className="text-muted-foreground">
+                    This will be saved as a standard medication and used for this purchase.
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -720,7 +941,9 @@ export default function CreateMedicationPurchasePage() {
               <CardTitle className="text-base">Medication Photos</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {loadingStandardImages && <div className="text-sm text-muted-foreground">Loading photos…</div>}
+              {loadingStandardImages && (
+                <div className="text-sm text-muted-foreground">Loading photos…</div>
+              )}
 
               {!loadingStandardImages && standardImagesError && (
                 <div className="text-sm text-red-600">{standardImagesError}</div>
@@ -730,10 +953,65 @@ export default function CreateMedicationPurchasePage() {
                 <ImageCarousel title="Standard reference photos" images={standardImages} />
               )}
 
-              <p className="text-xs text-muted-foreground">Tip: photos help confirm you’re selecting the right product.</p>
+              <p className="text-xs text-muted-foreground">
+                Tip: photos help confirm you’re selecting the right product.
+              </p>
             </CardContent>
           </Card>
         )}
+
+        {/* Purchase image uploads */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Purchase Photos (optional)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="text-sm text-muted-foreground">
+              Add a receipt or packaging photos now so you don’t have to dig later.
+            </div>
+
+            {(["receipt", "label", "packaging", "misc"] as PurchaseImagePurpose[]).map((purpose) => (
+              <div key={purpose} className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-4 items-start">
+                  <div className="min-w-0">
+                    <div className="font-medium md:whitespace-nowrap">
+                      {nicePurchasePurposeLabel(purpose)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {purpose === "receipt" && "Receipt / invoice photos."}
+                      {purpose === "label" && "Label close-ups from the purchased container."}
+                      {purpose === "packaging" && "Box / bottle / packaging photos (front/back)."}
+                      {purpose === "misc" && "Anything else worth keeping with this purchase."}
+                    </div>
+                  </div>
+
+                  <div className="w-full">
+                    <Input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="w-full"
+                      aria-label={`${nicePurchasePurposeLabel(purpose)} upload`}
+                      title={`${nicePurchasePurposeLabel(purpose)} upload`}
+                      onChange={(e) => addPurchaseImages(purpose, e.target.files)}
+                      disabled={!canInteract}
+                    />
+                  </div>
+                </div>
+
+                <LocalImageCarousel
+                  title={nicePurchasePurposeLabel(purpose)}
+                  images={purchaseImagesByPurpose[purpose]}
+                  onRemove={(id) => removePurchaseImage(purpose, id)}
+                />
+              </div>
+            ))}
+
+            <div className="text-xs text-muted-foreground">
+              Total selected: <span className="font-medium">{totalPurchaseImages}</span>
+            </div>
+          </CardContent>
+        </Card>
 
         <div className="flex items-center justify-end gap-3">
           <Button type="button" variant="outline" onClick={() => navigate(ROUTES.supplies.medications)}>
