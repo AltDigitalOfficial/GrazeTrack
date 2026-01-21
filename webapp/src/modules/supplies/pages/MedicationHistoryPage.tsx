@@ -27,6 +27,18 @@ function formatMaybeMoney(v: string | null): string {
   return `$${n.toFixed(2)}`;
 }
 
+function calculateUnitPrice(totalPrice: string | null, quantity: string): string {
+  if (!totalPrice) return "—";
+
+  const total = Number(totalPrice);
+  const qty = Number(quantity);
+
+  if (!Number.isFinite(total) || !Number.isFinite(qty) || qty <= 0) return "—";
+
+  const unit = total / qty;
+  return `$${unit.toFixed(2)}`;
+}
+
 export default function MedicationHistoryPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -82,7 +94,10 @@ export default function MedicationHistoryPage() {
           <Button variant="outline" onClick={() => navigate(-1)}>
             Back
           </Button>
-          <Button onClick={() => navigate(ROUTES.supplies.medicationsPurchasesCreate)} disabled={!canInteract}>
+          <Button
+            onClick={() => navigate(ROUTES.supplies.medicationsPurchasesCreate)}
+            disabled={!canInteract}
+          >
             Record Purchase
           </Button>
         </div>
@@ -95,15 +110,16 @@ export default function MedicationHistoryPage() {
       )}
 
       <Card title="Purchase History">
-        <div className="space-y-3">
+        <div className="space-y-3 p-4">
           {error && <div className="text-sm text-red-600">Error: {error}</div>}
 
           <div className="border rounded-md overflow-hidden">
-            <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs font-semibold text-stone-600 bg-stone-50">
+            <div className="grid grid-cols-14 gap-2 px-3 py-2 text-xs font-semibold text-stone-600 bg-stone-50">
               <div className="col-span-3">Date</div>
               <div className="col-span-3">Supplier</div>
               <div className="col-span-2">Qty</div>
               <div className="col-span-2">Total</div>
+              <div className="col-span-2">Unit price</div>
               <div className="col-span-2 text-right">Action</div>
             </div>
 
@@ -116,23 +132,35 @@ export default function MedicationHistoryPage() {
             ) : (
               <div className="divide-y">
                 {purchases.map((p) => (
-                  <div key={p.id} className="grid grid-cols-12 gap-2 px-3 py-3 text-sm items-center">
+                  <div
+                    key={p.id}
+                    className="grid grid-cols-14 gap-2 px-3 py-3 text-sm items-center"
+                  >
                     <div className="col-span-3 text-stone-800">{p.purchaseDate}</div>
                     <div className="col-span-3 text-stone-700">{p.supplierName ?? "—"}</div>
                     <div className="col-span-2 text-stone-700">{p.quantity}</div>
-                    <div className="col-span-2 text-stone-700">{formatMaybeMoney(p.totalPrice)}</div>
+                    <div className="col-span-2 text-stone-700">
+                      {formatMaybeMoney(p.totalPrice)}
+                    </div>
+                    <div className="col-span-2 text-stone-700">
+                      {calculateUnitPrice(p.totalPrice, p.quantity)}
+                    </div>
                     <div className="col-span-2 flex justify-end">
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => navigate(`/supplies/medications/purchases/${encodeURIComponent(p.id)}`)}
+                        onClick={() =>
+                          navigate(
+                            `/supplies/medications/purchases/${encodeURIComponent(p.id)}`
+                          )
+                        }
                       >
                         View
                       </Button>
                     </div>
 
                     {p.notes && (
-                      <div className="col-span-12 text-xs text-stone-500 -mt-1">
+                      <div className="col-span-14 text-xs text-stone-500 -mt-1">
                         Notes: {p.notes}
                       </div>
                     )}
@@ -143,7 +171,7 @@ export default function MedicationHistoryPage() {
           </div>
 
           <div className="text-xs text-stone-500">
-            Next: this page will also include “use/treatment” events once we add those tables/routes.
+            Unit price = total price ÷ quantity.
           </div>
         </div>
       </Card>

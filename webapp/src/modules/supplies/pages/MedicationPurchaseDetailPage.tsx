@@ -249,7 +249,7 @@ export default function MedicationPurchaseDetailPage() {
         <div>
           <h1 className="text-2xl font-semibold text-stone-800">{headerTitle}</h1>
           <p className="text-sm text-stone-600 mt-1">
-            Read-only purchase record (editing can come later).
+            Read-only purchase record
           </p>
         </div>
 
