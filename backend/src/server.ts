@@ -10,6 +10,7 @@ import { herdRoutes } from "./routes/herds";
 import { zonesRoutes } from "./routes/zones";
 import { medicationsRoutes } from "./routes/medications";
 import { medicationPurchasesRoutes } from "./routes/medicationPurchases";
+import { animalsRoutes } from "./routes/animals";
 
 async function start() {
   const app = Fastify({
@@ -44,7 +45,8 @@ async function start() {
   app.register(zonesRoutes, { prefix: "/api" });
   app.register(medicationsRoutes, { prefix: "/api" });
   app.register(medicationPurchasesRoutes, { prefix: "/api" });
-
+  app.register(animalsRoutes, { prefix: "/api" });
+  
   try {
     await app.listen({ port: 3001, host: "0.0.0.0" });
     console.log("GrazeTrack API running on http://localhost:3001");
