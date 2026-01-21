@@ -13,7 +13,7 @@ type InventoryRow = {
   id: string;
   displayName: string;
   quantity: string; // backend returns string
-  unit: string;     // derived canonical unit
+  unit: string; // derived canonical unit
   lastPurchaseDate: string | null;
 };
 
@@ -53,6 +53,12 @@ export default function MedicationsPage() {
 
   const goToStandardsCreate = () => navigate(ROUTES.supplies.medicationsStandardsCreate);
   const goToPurchasesCreate = () => navigate(ROUTES.supplies.medicationsPurchasesCreate);
+
+  const goToMedicationHistory = (standardMedicationId: string, displayName?: string) => {
+    navigate(`/supplies/medications/${encodeURIComponent(standardMedicationId)}/history`, {
+      state: { medicationDisplayName: displayName ?? null },
+    });
+  };
 
   const canInteract = useMemo(
     () => !ranchLoading && !!activeRanchId,
@@ -175,7 +181,16 @@ export default function MedicationsPage() {
                   const qtyNum = toNumberSafe(row.quantity);
                   return (
                     <div key={row.id} className="grid grid-cols-12 gap-2 px-3 py-3 text-sm">
-                      <div className="col-span-6 font-medium text-stone-800">{row.displayName}</div>
+                      <div className="col-span-6 min-w-0">
+                        <button
+                          type="button"
+                          className="font-medium text-stone-800 hover:underline underline-offset-4 text-left"
+                          onClick={() => goToMedicationHistory(row.id, row.displayName)}
+                          title="View history"
+                        >
+                          {row.displayName}
+                        </button>
+                      </div>
 
                       <div className="col-span-3 text-stone-700">
                         {qtyNum <= 0 ? (

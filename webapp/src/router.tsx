@@ -42,6 +42,8 @@ import SuppliesOverviewPage from "./modules/supplies/pages/SuppliesOverviewPage"
 import FeedPage from "./modules/supplies/pages/FeedPage";
 import MineralsPage from "./modules/supplies/pages/MineralsPage";
 import MedicationsPage from "./modules/supplies/pages/MedicationsPage";
+import MedicationHistoryPage from "./modules/supplies/pages/MedicationHistoryPage";
+import MedicationPurchaseDetailPage from "./modules/supplies/pages/MedicationPurchaseDetailPage";
 import CreateStandardMedicationsPage from "./modules/supplies/pages/CreateStandardMedicationsPage";
 import CreateMedicationPurchasePage from "./modules/supplies/pages/CreateMedicationPurchasePage";
 import FuelPage from "./modules/supplies/pages/FuelPage";
@@ -110,6 +112,8 @@ export const router = createBrowserRouter([
           { path: "supplies/feed", element: <FeedPage /> },
           { path: "supplies/minerals", element: <MineralsPage /> },
           { path: "supplies/medications", element: <MedicationsPage /> },
+          { path: "supplies/medications/:standardMedicationId/history", element: <MedicationHistoryPage /> },
+          { path: "supplies/medications/purchases/:purchaseId", element: <MedicationPurchaseDetailPage /> },
           { path: "supplies/medications/standards/create", element: <CreateStandardMedicationsPage /> },
           { path: "supplies/medications/purchases/create", element: <CreateMedicationPurchasePage /> },
           { path: "supplies/fuel", element: <FuelPage /> },

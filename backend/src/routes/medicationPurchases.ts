@@ -52,18 +52,14 @@ async function parseMultipartRequest(req: any): Promise<{
   const contentType = String(req.headers?.["content-type"] ?? "");
   const isMultipart = contentType.includes("multipart/form-data");
 
-  // ✅ Fix: for multipart, read parts from the stream. req.body is often empty unless
-  // fastify-multipart is configured with attachFieldsToBody.
+  // For multipart, read parts from the stream. req.body is often empty unless attachFieldsToBody is enabled.
   if (isMultipart && typeof req.parts === "function") {
     const body: Record<string, any> = {};
     const files: any[] = [];
 
     for await (const part of req.parts()) {
-      if (part.type === "file") {
-        files.push(part);
-      } else {
-        body[part.fieldname] = part.value;
-      }
+      if (part.type === "file") files.push(part);
+      else body[part.fieldname] = part.value;
     }
 
     return { body, files };
@@ -108,12 +104,10 @@ async function upsertSupplier(ranchId: string, name: string): Promise<string> {
  * - createNewMedication (and also create an active ranch standard)
  *
  * For multipart, createNewMedication can be passed as JSON string in a field.
- * To keep v1 simple and consistent, we also support flat fields for create-new.
  */
 const CreatePurchaseBody = z.object({
   standardMedicationId: z.string().optional(),
 
-  // optional create-new (either object or JSON string)
   createNewMedication: z
     .union([
       z.object({
@@ -156,7 +150,117 @@ const ListPurchasesQuery = z.object({
     .transform((v) => (v ? Math.min(Number(v), 200) : 50)),
 });
 
+const PurchaseParams = z.object({
+  purchaseId: z.string().min(1),
+});
+
 export async function medicationPurchasesRoutes(app: FastifyInstance) {
+  /**
+   * Purchase images for a purchase
+   */
+  app.get("/medication-purchases/:purchaseId/images", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const ranchId = await getActiveRanchId(req.auth!.userId);
+      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+
+      const { purchaseId } = PurchaseParams.parse(req.params ?? {});
+
+      // Verify purchase exists + belongs to ranch
+      const exists = await db
+        .select({ id: medicationPurchases.id })
+        .from(medicationPurchases)
+        .where(and(eq(medicationPurchases.ranchId, ranchId), eq(medicationPurchases.id, purchaseId)))
+        .limit(1);
+
+      if (!exists.length) return reply.status(404).send({ error: "Purchase not found" });
+
+      const rows = await db
+        .select({
+          id: medicationPurchaseImages.id,
+          purpose: medicationPurchaseImages.purpose,
+          storedFilename: medicationPurchaseImages.storedFilename,
+          originalFilename: medicationPurchaseImages.originalFilename,
+          mimeType: medicationPurchaseImages.mimeType,
+          sizeBytes: medicationPurchaseImages.sizeBytes,
+          createdAt: medicationPurchaseImages.createdAt,
+        })
+        .from(medicationPurchaseImages)
+        .where(
+          and(
+            eq(medicationPurchaseImages.ranchId, ranchId),
+            eq(medicationPurchaseImages.medicationPurchaseId, purchaseId)
+          )
+        )
+        .orderBy(desc(medicationPurchaseImages.createdAt));
+
+      const images = rows.map((r) => ({
+        id: r.id,
+        purpose: r.purpose,
+        storedFilename: r.storedFilename,
+        originalFilename: r.originalFilename ?? null,
+        mimeType: r.mimeType ?? null,
+        sizeBytes: r.sizeBytes ?? null,
+        createdAt: r.createdAt,
+        url: `/images/ranches/${ranchId}/medications/purchases/${purchaseId}/${r.purpose}/${r.storedFilename}`,
+      }));
+
+      return reply.send({ images });
+    } catch (err: any) {
+      req.log.error({ err }, "Failed to load purchase images");
+      return reply.status(500).send({ error: "Failed to load purchase images", message: err?.message });
+    }
+  });
+
+  /**
+   * Purchase detail (read-only)
+   */
+  app.get("/medication-purchases/:purchaseId", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const ranchId = await getActiveRanchId(req.auth!.userId);
+      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+
+      const { purchaseId } = PurchaseParams.parse(req.params ?? {});
+
+      const rows = await db
+        .select({
+          id: medicationPurchases.id,
+          ranchId: medicationPurchases.ranchId,
+          standardMedicationId: medicationPurchases.standardMedicationId,
+          supplierId: medicationPurchases.supplierId,
+          purchaseDate: medicationPurchases.purchaseDate,
+          quantity: medicationPurchases.quantity,
+          totalPrice: medicationPurchases.totalPrice,
+          notes: medicationPurchases.notes,
+          createdAt: medicationPurchases.createdAt,
+
+          supplierName: suppliers.name,
+
+          // Medication fields (for header/identity)
+          chemicalName: standardMedications.chemicalName,
+          format: standardMedications.format,
+          concentrationValue: standardMedications.concentrationValue,
+          concentrationUnit: standardMedications.concentrationUnit,
+          manufacturerName: standardMedications.manufacturerName,
+          brandName: standardMedications.brandName,
+        })
+        .from(medicationPurchases)
+        .leftJoin(suppliers, and(eq(suppliers.id, medicationPurchases.supplierId), eq(suppliers.ranchId, ranchId)))
+        .leftJoin(
+          standardMedications,
+          and(eq(standardMedications.id, medicationPurchases.standardMedicationId), eq(standardMedications.ranchId, ranchId))
+        )
+        .where(and(eq(medicationPurchases.ranchId, ranchId), eq(medicationPurchases.id, purchaseId)))
+        .limit(1);
+
+      if (!rows.length) return reply.status(404).send({ error: "Purchase not found" });
+
+      return reply.send({ purchase: rows[0] });
+    } catch (err: any) {
+      req.log.error({ err }, "Failed to load purchase detail");
+      return reply.status(500).send({ error: "Failed to load purchase detail", message: err?.message });
+    }
+  });
+
   /**
    * CREATE purchase (append-only)
    * + optional images saved to:
@@ -310,13 +414,7 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
               ? field
               : "misc";
 
-          const destDir = path.join(
-            ranchRoot,
-            "medications",
-            "purchases",
-            purchaseId,
-            purpose
-          );
+          const destDir = path.join(ranchRoot, "medications", "purchases", purchaseId, purpose);
 
           ensureDir(destDir);
 
