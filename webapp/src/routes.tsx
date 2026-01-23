@@ -1,3 +1,4 @@
+// routes.tsx
 export const ROUTES = {
   auth: {
     login: "/login",
@@ -12,8 +13,11 @@ export const ROUTES = {
     list: "/herd",
     edit: "/herd/create",
     create: "/herd/create",
+
+    // Animals (Inventory)
     animals: "/herd/animals",
-    health: "/herd/health",
+    animalDetail: "/herd/animals/:animalId",
+    animalIntake: "/herd/animals/intake",
   },
 
   land: {

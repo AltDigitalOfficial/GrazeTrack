@@ -1,3 +1,4 @@
+// router.tsx
 import { createBrowserRouter } from "react-router-dom";
 import { Shell } from "./components/layout/Shell";
 import { ROUTES } from "./routes";
@@ -19,8 +20,7 @@ import RanchOverviewPage from "./modules/ranch/pages/RanchOverviewPage";
 // Herd
 import ListHerdPage from "./modules/herd-management/pages/ListHerdPage";
 import CreateHerdPage from "./modules/herd-management/pages/CreateHerdPage";
-import ManageAnimalsPage from "./modules/herd-management/pages/ManageAnimalsPage";
-import HealthLogsPage from "./modules/herd-management/pages/HealthLogsPage";
+import AnimalInventoryListPage from "./modules/herd-management/pages/AnimalInventoryListPage";
 
 // Land
 import LandManagementPage from "./modules/land-management/pages/LandManagementPage";
@@ -73,10 +73,8 @@ import CalendarViewPage from "./modules/tasks/pages/CalendarViewPage";
 import AppointmentPage from "./modules/tasks/pages/AppointmentPage";
 
 export const router = createBrowserRouter([
-  // ✅ Public
   { path: ROUTES.auth.login, element: <LoginPage /> },
 
-  // ✅ Protected
   {
     path: ROUTES.ranch.overview, // "/"
     element: <AuthGate />,
@@ -89,8 +87,12 @@ export const router = createBrowserRouter([
           // Herd
           { path: "herd", element: <ListHerdPage /> },
           { path: "herd/create", element: <CreateHerdPage /> },
-          { path: "herd/animals", element: <ManageAnimalsPage /> },
-          { path: "herd/health", element: <HealthLogsPage /> },
+
+          // Animals (Inventory is now first-class)
+          { path: "herd/animals", element: <AnimalInventoryListPage /> },
+          // future:
+          // { path: "herd/animals/:animalId", element: <AnimalDetailPage /> },
+          // { path: "herd/animals/intake", element: <AnimalIntakePage /> },
 
           // Land
           { path: "land", element: <LandManagementPage /> },

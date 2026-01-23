@@ -11,6 +11,7 @@ import {
   index,
   uniqueIndex,
   integer,
+  uuid as pgUuid,
 } from "drizzle-orm/pg-core";
 
 /* =========================================================================================
@@ -21,7 +22,7 @@ import {
  * Ranches
  */
 export const ranches = pgTable("ranches", {
-  id: text("id").primaryKey(),
+  id: pgUuid("id").primaryKey(),
 
   name: text("name"),
   description: text("description"),
@@ -47,6 +48,10 @@ export const ranches = pgTable("ranches", {
 
 /**
  * Users (local mirror of Firebase users)
+ *
+ * NOTE:
+ * - We keep users.id as TEXT because it is (or is treated like) the Firebase UID in auth flows.
+ * - Converting users.id to UUID would require a broader auth/membership refactor.
  */
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -57,12 +62,15 @@ export const users = pgTable("users", {
 
 /**
  * User ↔ Ranch membership
+ *
+ * user_id remains TEXT (Firebase UID).
+ * ranch_id is UUID (standard).
  */
 export const userRanches = pgTable(
   "user_ranches",
   {
     userId: text("user_id").notNull(),
-    ranchId: text("ranch_id").notNull(),
+    ranchId: pgUuid("ranch_id").notNull(),
     role: text("role").default("admin"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -79,8 +87,8 @@ export const userRanches = pgTable(
 export const herds = pgTable(
   "herds",
   {
-    id: text("id").primaryKey(),
-    ranchId: text("ranch_id").notNull(),
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
 
     name: text("name").notNull(),
     shortDescription: text("short_description"),
@@ -102,6 +110,35 @@ export const herds = pgTable(
   })
 );
 
+/**
+ * Zones (pastures/grazing areas) - PostGIS geometry
+ */
+const geometry = customType<{ data: any; driverData: any }>({
+  dataType() {
+    return "geometry";
+  },
+});
+
+export const zones = pgTable(
+  "zones",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+
+    name: text("name").notNull(),
+    description: text("description"),
+
+    areaAcres: decimal("area_acres"),
+    geom: geometry("geom"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("zones_ranch_idx").on(t.ranchId),
+    ranchNameIdx: index("zones_ranch_name_idx").on(t.ranchId, t.name),
+  })
+);
+
 /* =========================================================================================
  * Animals (Animal Inventory v1)
  *
@@ -109,12 +146,15 @@ export const herds = pgTable(
  * - animals are NOT directly attached to a ranch.
  * - ranch context is derived via herd membership.
  * - we still store ranch_id snapshots on event/media rows for fast queries + historical truth.
+ *
+ * UUID Standard:
+ * - All id / *_id columns in animal domain are UUID.
  * ========================================================================================= */
 
 export const animals = pgTable(
   "animals",
   {
-    id: text("id").primaryKey(),
+    id: pgUuid("id").primaryKey(),
 
     // kept for flexibility / backward compatibility
     tag: text("tag"),
@@ -138,8 +178,8 @@ export const animals = pgTable(
     statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
 
     // lineage (no FK)
-    damAnimalId: text("dam_animal_id"),
-    sireAnimalId: text("sire_animal_id"),
+    damAnimalId: pgUuid("dam_animal_id"),
+    sireAnimalId: pgUuid("sire_animal_id"),
 
     // repro
     neutered: boolean("neutered").notNull().default(false),
@@ -155,35 +195,6 @@ export const animals = pgTable(
   })
 );
 
-/**
- * Zones (pastures/grazing areas) - PostGIS geometry
- */
-const geometry = customType<{ data: any; driverData: any }>({
-  dataType() {
-    return "geometry";
-  },
-});
-
-export const zones = pgTable(
-  "zones",
-  {
-    id: text("id").primaryKey(),
-    ranchId: text("ranch_id").notNull(),
-
-    name: text("name").notNull(),
-    description: text("description"),
-
-    areaAcres: decimal("area_acres"),
-    geom: geometry("geom"),
-
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => ({
-    ranchIdx: index("zones_ranch_idx").on(t.ranchId),
-    ranchNameIdx: index("zones_ranch_name_idx").on(t.ranchId, t.name),
-  })
-);
-
 /* =========================================================================================
  * Animal ↔ Herd membership (time-ranged)
  * ========================================================================================= */
@@ -191,10 +202,10 @@ export const zones = pgTable(
 export const animalHerdMembership = pgTable(
   "animal_herd_membership",
   {
-    id: text("id").primaryKey(),
+    id: pgUuid("id").primaryKey(),
 
-    animalId: text("animal_id").notNull(),
-    herdId: text("herd_id").notNull(),
+    animalId: pgUuid("animal_id").notNull(),
+    herdId: pgUuid("herd_id").notNull(),
 
     startAt: timestamp("start_at", { withTimezone: true }).defaultNow().notNull(),
     endAt: timestamp("end_at", { withTimezone: true }),
@@ -219,19 +230,19 @@ export const animalHerdMembership = pgTable(
 export const animalIntakeEvents = pgTable(
   "animal_intake_events",
   {
-    id: text("id").primaryKey(),
+    id: pgUuid("id").primaryKey(),
 
-    ranchId: text("ranch_id").notNull(), // snapshot
-    herdId: text("herd_id").notNull(), // snapshot
-    animalId: text("animal_id").notNull(),
+    ranchId: pgUuid("ranch_id").notNull(), // snapshot
+    herdId: pgUuid("herd_id").notNull(), // snapshot
+    animalId: pgUuid("animal_id").notNull(),
 
     intakeType: text("intake_type").notNull(),
     eventDate: date("event_date").notNull(),
 
     // birth
     bornOnRanch: boolean("born_on_ranch"),
-    damAnimalId: text("dam_animal_id"),
-    sireAnimalId: text("sire_animal_id"),
+    damAnimalId: pgUuid("dam_animal_id"),
+    sireAnimalId: pgUuid("sire_animal_id"),
 
     // purchase
     supplierName: text("supplier_name"),
@@ -265,11 +276,11 @@ export const animalIntakeEvents = pgTable(
 export const animalMeasurements = pgTable(
   "animal_measurements",
   {
-    id: text("id").primaryKey(),
+    id: pgUuid("id").primaryKey(),
 
-    ranchId: text("ranch_id").notNull(), // snapshot
-    herdId: text("herd_id").notNull(), // snapshot
-    animalId: text("animal_id").notNull(),
+    ranchId: pgUuid("ranch_id").notNull(), // snapshot
+    herdId: pgUuid("herd_id").notNull(), // snapshot
+    animalId: pgUuid("animal_id").notNull(),
 
     measurementType: text("measurement_type").notNull(), // weight | temperature | body_condition_score | other
     valueNumber: decimal("value_number"),
@@ -305,11 +316,11 @@ export const animalMeasurements = pgTable(
 export const animalNotes = pgTable(
   "animal_notes",
   {
-    id: text("id").primaryKey(),
+    id: pgUuid("id").primaryKey(),
 
-    ranchId: text("ranch_id").notNull(), // snapshot
-    herdId: text("herd_id").notNull(), // snapshot
-    animalId: text("animal_id").notNull(),
+    ranchId: pgUuid("ranch_id").notNull(), // snapshot
+    herdId: pgUuid("herd_id").notNull(), // snapshot
+    animalId: pgUuid("animal_id").notNull(),
 
     noteType: text("note_type"),
     content: text("content").notNull(),
@@ -318,16 +329,8 @@ export const animalNotes = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
-    ranchAnimalCreatedIdx: index("animal_notes_ranch_animal_created_idx").on(
-      t.ranchId,
-      t.animalId,
-      t.createdAt
-    ),
-    herdAnimalCreatedIdx: index("animal_notes_herd_animal_created_idx").on(
-      t.herdId,
-      t.animalId,
-      t.createdAt
-    ),
+    ranchAnimalCreatedIdx: index("animal_notes_ranch_animal_created_idx").on(t.ranchId, t.animalId, t.createdAt),
+    herdAnimalCreatedIdx: index("animal_notes_herd_animal_created_idx").on(t.herdId, t.animalId, t.createdAt),
   })
 );
 
@@ -337,12 +340,12 @@ export const animalNotes = pgTable(
 export const animalPhotos = pgTable(
   "animal_photos",
   {
-    id: text("id").primaryKey(),
+    id: pgUuid("id").primaryKey(),
 
-    ranchId: text("ranch_id").notNull(), // snapshot
-    herdId: text("herd_id").notNull(), // snapshot
+    ranchId: pgUuid("ranch_id").notNull(), // snapshot
+    herdId: pgUuid("herd_id").notNull(), // snapshot
 
-    animalId: text("animal_id"),
+    animalId: pgUuid("animal_id"),
 
     purpose: text("purpose").notNull(), // profile | side | tag | misc
     storedFilename: text("stored_filename").notNull(),
@@ -361,11 +364,7 @@ export const animalPhotos = pgTable(
   (t) => ({
     ranchCreatedIdx: index("animal_photos_ranch_created_idx").on(t.ranchId, t.createdAt),
     herdCreatedIdx: index("animal_photos_herd_created_idx").on(t.herdId, t.createdAt),
-    ranchAnimalCreatedIdx: index("animal_photos_ranch_animal_created_idx").on(
-      t.ranchId,
-      t.animalId,
-      t.createdAt
-    ),
+    ranchAnimalCreatedIdx: index("animal_photos_ranch_animal_created_idx").on(t.ranchId, t.animalId, t.createdAt),
   })
 );
 
@@ -375,11 +374,11 @@ export const animalPhotos = pgTable(
 export const animalDocuments = pgTable(
   "animal_documents",
   {
-    id: text("id").primaryKey(),
+    id: pgUuid("id").primaryKey(),
 
-    ranchId: text("ranch_id").notNull(), // snapshot
-    herdId: text("herd_id").notNull(), // snapshot
-    animalId: text("animal_id").notNull(),
+    ranchId: pgUuid("ranch_id").notNull(), // snapshot
+    herdId: pgUuid("herd_id").notNull(), // snapshot
+    animalId: pgUuid("animal_id").notNull(),
 
     purpose: text("purpose").notNull(), // medical | insurance | registration | misc
     storedFilename: text("stored_filename").notNull(),
@@ -392,16 +391,8 @@ export const animalDocuments = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
-    ranchAnimalCreatedIdx: index("animal_documents_ranch_animal_created_idx").on(
-      t.ranchId,
-      t.animalId,
-      t.createdAt
-    ),
-    herdAnimalCreatedIdx: index("animal_documents_herd_animal_created_idx").on(
-      t.herdId,
-      t.animalId,
-      t.createdAt
-    ),
+    ranchAnimalCreatedIdx: index("animal_documents_ranch_animal_created_idx").on(t.ranchId, t.animalId, t.createdAt),
+    herdAnimalCreatedIdx: index("animal_documents_herd_animal_created_idx").on(t.herdId, t.animalId, t.createdAt),
   })
 );
 
@@ -411,11 +402,11 @@ export const animalDocuments = pgTable(
 export const animalPhotoTags = pgTable(
   "animal_photo_tags",
   {
-    id: text("id").primaryKey(),
+    id: pgUuid("id").primaryKey(),
 
-    ranchId: text("ranch_id").notNull(), // snapshot
-    photoId: text("photo_id").notNull(),
-    animalId: text("animal_id").notNull(),
+    ranchId: pgUuid("ranch_id").notNull(), // snapshot
+    photoId: pgUuid("photo_id").notNull(),
+    animalId: pgUuid("animal_id").notNull(),
 
     tagType: text("tag_type").notNull().default("contains"), // contains | primary | uncertain
     confidence: decimal("confidence"),
@@ -425,17 +416,15 @@ export const animalPhotoTags = pgTable(
   },
   (t) => ({
     uniqueTag: uniqueIndex("animal_photo_tags_unique").on(t.ranchId, t.photoId, t.animalId),
-    ranchAnimalCreatedIdx: index("animal_photo_tags_ranch_animal_created_idx").on(
-      t.ranchId,
-      t.animalId,
-      t.createdAt
-    ),
+    ranchAnimalCreatedIdx: index("animal_photo_tags_ranch_animal_created_idx").on(t.ranchId, t.animalId, t.createdAt),
     ranchPhotoIdx: index("animal_photo_tags_ranch_photo_idx").on(t.ranchId, t.photoId),
   })
 );
 
 /* =========================================================================================
- * Medication Module (v1)  ✅ kept aligned with your existing routes
+ * Medication Module (v1)
+ * UUID Standard:
+ * - All PK ids and *_id relationship columns are UUID (except user_id).
  * ========================================================================================= */
 
 /**
@@ -444,8 +433,8 @@ export const animalPhotoTags = pgTable(
 export const suppliers = pgTable(
   "suppliers",
   {
-    id: text("id").primaryKey(),
-    ranchId: text("ranch_id").notNull(),
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
 
     name: text("name").notNull(),
     nameNormalized: text("name_normalized").notNull(),
@@ -459,14 +448,13 @@ export const suppliers = pgTable(
 );
 
 /**
- * Standard Medications: the "thing they usually buy" (dropdown source)
- * Scoped to ranch.
+ * Standard Medications
  */
 export const standardMedications = pgTable(
   "standard_medications",
   {
-    id: text("id").primaryKey(),
-    ranchId: text("ranch_id").notNull(),
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
 
     chemicalName: text("chemical_name").notNull(),
     format: text("format").notNull(),
@@ -493,9 +481,9 @@ export const standardMedications = pgTable(
 export const ranchMedicationStandards = pgTable(
   "ranch_medication_standards",
   {
-    id: text("id").primaryKey(),
-    ranchId: text("ranch_id").notNull(),
-    standardMedicationId: text("standard_medication_id").notNull(),
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    standardMedicationId: pgUuid("standard_medication_id").notNull(),
 
     usesOffLabel: boolean("uses_off_label").notNull(),
     standardDoseText: text("standard_dose_text").notNull(),
@@ -508,11 +496,7 @@ export const ranchMedicationStandards = pgTable(
   (t) => ({
     ranchIdx: index("ranch_med_standards_ranch_idx").on(t.ranchId),
     medIdx: index("ranch_med_standards_med_idx").on(t.standardMedicationId),
-    activeLookupIdx: index("ranch_med_standards_active_lookup_idx").on(
-      t.ranchId,
-      t.standardMedicationId,
-      t.endDate
-    ),
+    activeLookupIdx: index("ranch_med_standards_active_lookup_idx").on(t.ranchId, t.standardMedicationId, t.endDate),
   })
 );
 
@@ -522,11 +506,11 @@ export const ranchMedicationStandards = pgTable(
 export const medicationPurchases = pgTable(
   "medication_purchases",
   {
-    id: text("id").primaryKey(),
-    ranchId: text("ranch_id").notNull(),
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
 
-    standardMedicationId: text("standard_medication_id").notNull(),
-    supplierId: text("supplier_id"),
+    standardMedicationId: pgUuid("standard_medication_id").notNull(),
+    supplierId: pgUuid("supplier_id"),
 
     purchaseDate: date("purchase_date").notNull(),
 
@@ -547,15 +531,14 @@ export const medicationPurchases = pgTable(
 
 /**
  * Medication Purchase Images
- * purpose: receipt | label | packaging | misc
  */
 export const medicationPurchaseImages = pgTable(
   "medication_purchase_images",
   {
-    id: text("id").primaryKey(),
-    ranchId: text("ranch_id").notNull(),
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
 
-    medicationPurchaseId: text("medication_purchase_id").notNull(),
+    medicationPurchaseId: pgUuid("medication_purchase_id").notNull(),
 
     purpose: text("purpose").notNull(),
     storedFilename: text("stored_filename").notNull(),
@@ -573,15 +556,14 @@ export const medicationPurchaseImages = pgTable(
 
 /**
  * Standard Medication Images
- * purpose: label | insert | misc
  */
 export const standardMedicationImages = pgTable(
   "standard_medication_images",
   {
-    id: text("id").primaryKey(),
-    ranchId: text("ranch_id").notNull(),
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
 
-    standardMedicationId: text("standard_medication_id").notNull(),
+    standardMedicationId: pgUuid("standard_medication_id").notNull(),
 
     purpose: text("purpose").notNull(),
     storedFilename: text("stored_filename").notNull(),

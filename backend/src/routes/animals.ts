@@ -1,14 +1,19 @@
 // backend/src/routes/animals.ts
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 import { db } from "../db";
 import {
   animals,
+  animalDocuments,
   animalHerdMembership,
   animalIntakeEvents,
+  animalMeasurements,
+  animalNotes,
+  animalPhotos,
+  animalPhotoTags,
   herds,
   userRanches,
 } from "../db/schema";
@@ -19,7 +24,7 @@ import { requireAuth } from "../plugins/requireAuth";
  * ------------------------------------------------------------------------------------------------ */
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  // Matches existing backend convention used in medications routes:
+  // Matches your existing backend convention (e.g., medications):
   // pick the first ranch membership row.
   const rows = await db
     .select({ ranchId: userRanches.ranchId })
@@ -48,7 +53,13 @@ async function requireHerdWithRanchAccess(
   const accessRows = await db
     .select({ userId: userRanches.userId })
     .from(userRanches)
-    .where(and(eq(userRanches.userId, userId), eq(userRanches.ranchId, herdRow.ranchId)))
+    .where(
+      and(
+        eq(userRanches.userId, userId),
+        // ✅ ensure uuid-to-uuid comparison (cast param)
+        sql`${userRanches.ranchId} = ${herdRow.ranchId}::uuid`
+      )
+    )
     .limit(1);
 
   if (!accessRows[0]) {
@@ -58,15 +69,76 @@ async function requireHerdWithRanchAccess(
   return { herdId: herdRow.herdId, ranchId: herdRow.ranchId };
 }
 
+/**
+ * For animal-specific operations, derive ranch scope from CURRENT herd membership.
+ * This prevents any cross-ranch access regardless of "active ranch" selection.
+ */
+async function requireCurrentMembershipScope(
+  userId: string,
+  animalId: string
+): Promise<{ ranchId: string; herdId: string; membershipId: string }> {
+  const membershipRows = await db
+    .select({
+      membershipId: animalHerdMembership.id,
+      herdId: animalHerdMembership.herdId,
+    })
+    .from(animalHerdMembership)
+    .where(and(eq(animalHerdMembership.animalId, animalId), isNull(animalHerdMembership.endAt)))
+    .orderBy(desc(animalHerdMembership.startAt))
+    .limit(1);
+
+  const membership = membershipRows[0];
+  if (!membership) {
+    throw Object.assign(new Error("Animal has no current herd membership"), { statusCode: 404 });
+  }
+
+  const herdRows = await db
+    .select({ ranchId: herds.ranchId })
+    .from(herds)
+    .where(eq(herds.id, membership.herdId))
+    .limit(1);
+
+  const herdRow = herdRows[0];
+  if (!herdRow) {
+    throw Object.assign(new Error("Herd not found for current membership"), { statusCode: 404 });
+  }
+
+  // Enforce ranch membership
+  const accessRows = await db
+    .select({ userId: userRanches.userId })
+    .from(userRanches)
+    .where(
+      and(
+        eq(userRanches.userId, userId),
+        // ✅ ensure uuid-to-uuid comparison (cast param)
+        sql`${userRanches.ranchId} = ${herdRow.ranchId}::uuid`
+      )
+    )
+    .limit(1);
+
+  if (!accessRows[0]) {
+    throw Object.assign(new Error("Forbidden: no access to this ranch"), { statusCode: 403 });
+  }
+
+  return { ranchId: herdRow.ranchId, herdId: membership.herdId, membershipId: membership.membershipId };
+}
+
 function sendError(reply: any, err: any) {
   const statusCode = typeof err?.statusCode === "number" ? err.statusCode : 500;
 
+  const pgMessage =
+    err?.cause?.message ||
+    err?.cause?.toString?.() ||
+    err?.originalError?.message ||
+    null;
+
   if (statusCode === 500) {
-    reply.log.error({ err }, "animalsRoutes error");
+    reply.log.error({ err, pgMessage }, "animalsRoutes error");
   }
 
   return reply.status(statusCode).send({
     error: err?.message ?? "Unexpected server error",
+    pg: pgMessage,
   });
 }
 
@@ -124,6 +196,21 @@ const ListAnimalsQuerySchema = z.object({
   herdId: z.string().optional(),
 });
 
+const CreateMeasurementSchema = z.object({
+  measurementType: z.string().min(1), // weight | temperature | body_condition_score | other | etc
+  valueNumber: z.number().optional().nullable(),
+  valueText: z.string().optional().nullable(),
+  unit: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  measuredAt: z.string().optional().nullable(), // ISO datetime
+});
+
+const CreateNoteSchema = z.object({
+  noteType: z.string().optional().nullable(), // health | behavior | handling | general
+  content: z.string().min(1),
+  noteAt: z.string().optional().nullable(), // ISO datetime
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Routes
  * ------------------------------------------------------------------------------------------------ */
@@ -136,7 +223,7 @@ export async function animalsRoutes(app: FastifyInstance) {
    * based on CURRENT herd membership (end_at is null).
    *
    * Optional:
-   * - ?herdId=<uuid> to filter to a specific herd (must be in a ranch you can access).
+   * - ?herdId=<uuid> to filter to a specific herd (must be in the same active ranch).
    */
   app.get("/animals", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -147,16 +234,11 @@ export async function animalsRoutes(app: FastifyInstance) {
 
       const { herdId } = parsed.data;
 
-      // Determine ranch scope in the same way existing routes do.
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
 
       if (herdId) {
-        // Validate herd is within a ranch this user can access.
-        // (Also prevents cross-ranch probing by herdId)
         const herdAccess = await requireHerdWithRanchAccess(req.auth!.userId, herdId);
-
-        // If the herd is not in the user's "active" ranch, be explicit:
         if (herdAccess.ranchId !== ranchId) {
           return reply.status(400).send({
             error: "Herd is not in the active ranch",
@@ -165,6 +247,13 @@ export async function animalsRoutes(app: FastifyInstance) {
           });
         }
       }
+
+      const conditions = [
+        // ✅ ensure uuid-to-uuid comparison (cast param)
+        sql`${herds.ranchId} = ${ranchId}::uuid`,
+        isNull(animalHerdMembership.endAt),
+        ...(herdId ? [eq(herds.id, herdId)] : []),
+      ];
 
       const rows = await db
         .select({
@@ -190,13 +279,7 @@ export async function animalsRoutes(app: FastifyInstance) {
         .from(animalHerdMembership)
         .innerJoin(herds, eq(animalHerdMembership.herdId, herds.id))
         .innerJoin(animals, eq(animalHerdMembership.animalId, animals.id))
-        .where(
-          and(
-            eq(herds.ranchId, ranchId),
-            isNull(animalHerdMembership.endAt),
-            herdId ? eq(herds.id, herdId) : undefined
-          )
-        )
+        .where(and(...conditions))
         .orderBy(desc(animals.createdAt));
 
       return reply.send({
@@ -210,12 +293,117 @@ export async function animalsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * POST /api/animals/intake/birth
+   * GET /api/animals/:animalId
    *
-   * Creates:
-   * - animals row
-   * - animal_herd_membership row (current)
-   * - animal_intake_events row (snapshot ranch_id + herd_id)
+   * Animal detail payload:
+   * - animal core fields
+   * - current membership + herd + ranch
+   * - intake events (append-only)
+   * - measurements (recent)
+   * - notes (recent)
+   * - photos that include this animal (via tags join)
+   * - documents for this animal
+   */
+  app.get("/animals/:animalId", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const animalId = (req.params as any)?.animalId as string;
+      if (!animalId) return reply.status(400).send({ error: "Missing animalId" });
+
+      const scope = await requireCurrentMembershipScope(req.auth!.userId, animalId);
+
+      const animalRows = await db.select().from(animals).where(eq(animals.id, animalId)).limit(1);
+      const animal = animalRows[0];
+      if (!animal) return reply.status(404).send({ error: "Animal not found" });
+
+      const herdRows = await db
+        .select({ id: herds.id, name: herds.name, ranchId: herds.ranchId })
+        .from(herds)
+        .where(eq(herds.id, scope.herdId))
+        .limit(1);
+
+      const herd = herdRows[0] ?? null;
+
+      const intakeEvents = await db
+        .select()
+        .from(animalIntakeEvents)
+        .where(eq(animalIntakeEvents.animalId, animalId))
+        .orderBy(desc(animalIntakeEvents.createdAt))
+        .limit(50);
+
+      const measurements = await db
+        .select()
+        .from(animalMeasurements)
+        .where(eq(animalMeasurements.animalId, animalId))
+        .orderBy(desc(animalMeasurements.measuredAt), desc(animalMeasurements.createdAt))
+        .limit(100);
+
+      const notes = await db
+        .select()
+        .from(animalNotes)
+        .where(eq(animalNotes.animalId, animalId))
+        .orderBy(desc(animalNotes.noteAt), desc(animalNotes.createdAt))
+        .limit(100);
+
+      // Photos that include this animal:
+      // animal_photo_tags (animal_id) -> animal_photos (photo_id)
+      const taggedPhotos = await db
+        .select({
+          photoId: animalPhotos.id,
+          ranchId: animalPhotos.ranchId,
+          herdId: animalPhotos.herdId,
+          animalId: animalPhotos.animalId,
+          purpose: animalPhotos.purpose,
+          storedFilename: animalPhotos.storedFilename,
+          originalFilename: animalPhotos.originalFilename,
+          mimeType: animalPhotos.mimeType,
+          sizeBytes: animalPhotos.sizeBytes,
+          width: animalPhotos.width,
+          height: animalPhotos.height,
+          capturedAt: animalPhotos.capturedAt,
+          caption: animalPhotos.caption,
+          createdAt: animalPhotos.createdAt,
+
+          tagId: animalPhotoTags.id,
+          tagType: animalPhotoTags.tagType,
+          confidence: animalPhotoTags.confidence,
+          tagNotes: animalPhotoTags.notes,
+          tagCreatedAt: animalPhotoTags.createdAt,
+        })
+        .from(animalPhotoTags)
+        .innerJoin(animalPhotos, eq(animalPhotoTags.photoId, animalPhotos.id))
+        .where(and(eq(animalPhotoTags.animalId, animalId), eq(animalPhotoTags.ranchId, scope.ranchId)))
+        .orderBy(desc(animalPhotos.createdAt))
+        .limit(200);
+
+      // Documents
+      const documents = await db
+        .select()
+        .from(animalDocuments)
+        .where(eq(animalDocuments.animalId, animalId))
+        .orderBy(desc(animalDocuments.createdAt))
+        .limit(200);
+
+      return reply.send({
+        animal,
+        current: {
+          ranchId: scope.ranchId,
+          herdId: scope.herdId,
+          membershipId: scope.membershipId,
+          herd,
+        },
+        intakeEvents,
+        measurements,
+        notes,
+        photos: taggedPhotos,
+        documents,
+      });
+    } catch (err: any) {
+      return sendError(reply, err);
+    }
+  });
+
+  /**
+   * POST /api/animals/intake/birth
    */
   app.post("/animals/intake/birth", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -307,11 +495,6 @@ export async function animalsRoutes(app: FastifyInstance) {
 
   /**
    * POST /api/animals/intake/purchase
-   *
-   * Creates:
-   * - animals row
-   * - animal_herd_membership row (current)
-   * - animal_intake_events row (snapshot ranch_id + herd_id)
    */
   app.post("/animals/intake/purchase", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -396,6 +579,95 @@ export async function animalsRoutes(app: FastifyInstance) {
         membershipId,
         intakeEventId: intakeId,
       });
+    } catch (err: any) {
+      return sendError(reply, err);
+    }
+  });
+
+  /**
+   * POST /api/animals/:animalId/measurements
+   *
+   * Appends a measurement row, with ranch_id + herd_id snapshots derived from current membership.
+   */
+  app.post("/animals/:animalId/measurements", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const animalId = (req.params as any)?.animalId as string;
+      if (!animalId) return reply.status(400).send({ error: "Missing animalId" });
+
+      const parsed = CreateMeasurementSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.flatten() });
+      }
+
+      const scope = await requireCurrentMembershipScope(req.auth!.userId, animalId);
+
+      const m = parsed.data;
+
+      // Require at least one of valueNumber/valueText
+      if ((m.valueNumber == null || Number.isNaN(m.valueNumber)) && !m.valueText) {
+        return reply.status(400).send({ error: "Provide valueNumber or valueText" });
+      }
+
+      const id = uuid();
+      const now = new Date();
+
+      await db.insert(animalMeasurements).values({
+        id,
+        ranchId: scope.ranchId,
+        herdId: scope.herdId,
+        animalId,
+
+        measurementType: m.measurementType,
+        valueNumber: m.valueNumber == null ? null : String(m.valueNumber),
+        valueText: m.valueText ?? null,
+        unit: m.unit ?? null,
+        notes: m.notes ?? null,
+
+        measuredAt: m.measuredAt ? new Date(m.measuredAt) : now,
+        createdAt: now,
+      });
+
+      return reply.status(201).send({ id });
+    } catch (err: any) {
+      return sendError(reply, err);
+    }
+  });
+
+  /**
+   * POST /api/animals/:animalId/notes
+   *
+   * Appends a note row, with ranch_id + herd_id snapshots derived from current membership.
+   */
+  app.post("/animals/:animalId/notes", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const animalId = (req.params as any)?.animalId as string;
+      if (!animalId) return reply.status(400).send({ error: "Missing animalId" });
+
+      const parsed = CreateNoteSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.flatten() });
+      }
+
+      const scope = await requireCurrentMembershipScope(req.auth!.userId, animalId);
+
+      const n = parsed.data;
+      const id = uuid();
+      const now = new Date();
+
+      await db.insert(animalNotes).values({
+        id,
+        ranchId: scope.ranchId,
+        herdId: scope.herdId,
+        animalId,
+
+        noteType: n.noteType ?? null,
+        content: n.content,
+
+        noteAt: n.noteAt ? new Date(n.noteAt) : now,
+        createdAt: now,
+      });
+
+      return reply.status(201).send({ id });
     } catch (err: any) {
       return sendError(reply, err);
     }

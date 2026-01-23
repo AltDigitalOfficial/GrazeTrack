@@ -1,3 +1,4 @@
+// Sidebar.tsx
 import { NavLink, useLocation } from "react-router-dom";
 import { signOut } from "firebase/auth";
 
@@ -62,268 +63,267 @@ export function Sidebar() {
       {/* Scrollable nav - takes up space between header and footer */}
       <nav className="flex-1 overflow-y-auto px-4 py-4 pb-20 min-h-0">
         <div className="flex flex-col space-y-2">
-        {/* RANCH OVERVIEW */}
-        <NavLink to={ROUTES.ranch.overview} className={linkClasses}>
-          Ranch Overview
-        </NavLink>
-
-        {/* HERD MANAGEMENT */}
-        <div>
-          <NavLink
-            to={ROUTES.herd.root}
-            className={({ isActive }) =>
-              `block px-2 py-1 rounded font-semibold ${
-                herdActive || isActive
-                  ? "bg-green-100 text-green-800"
-                  : "text-stone-100 hover:bg-stone-700"
-              }`
-            }
-          >
-            Herd Management
+          {/* RANCH OVERVIEW */}
+          <NavLink to={ROUTES.ranch.overview} className={linkClasses}>
+            Ranch Overview
           </NavLink>
 
-          {herdActive && (
-            <div className="mt-1 space-y-1">
-              <NavLink to={ROUTES.herd.create} className={nestedLinkClasses}>
-                Herds
-              </NavLink>
+          {/* HERD MANAGEMENT */}
+          <div>
+            <NavLink
+              to={ROUTES.herd.root}
+              className={({ isActive }) =>
+                `block px-2 py-1 rounded font-semibold ${
+                  herdActive || isActive
+                    ? "bg-green-100 text-green-800"
+                    : "text-stone-100 hover:bg-stone-700"
+                }`
+              }
+            >
+              Herd Management
+            </NavLink>
 
-              <NavLink to={ROUTES.herd.animals} className={nestedLinkClasses}>
-                Add / Remove Animals
-              </NavLink>
+            {herdActive && (
+              <div className="mt-1 space-y-1">
+                <NavLink to={ROUTES.herd.create} className={nestedLinkClasses}>
+                  Herds
+                </NavLink>
 
-              <NavLink to={ROUTES.herd.health} className={nestedLinkClasses}>
-                Health Records
-              </NavLink>
-            </div>
-          )}
-        </div>
+                {/* Animals inventory (first page = AnimalInventoryListPage.tsx) */}
+                <NavLink to={ROUTES.herd.animals} className={nestedLinkClasses}>
+                  Animals
+                </NavLink>
 
-        {/* LAND MANAGEMENT */}
-        <div>
-          <NavLink
-            to={ROUTES.land.root}
-            className={({ isActive }) =>
-              `block px-2 py-1 rounded font-semibold ${
-                landActive || isActive
-                  ? "bg-green-100 text-green-800"
-                  : "text-stone-100 hover:bg-stone-700"
-              }`
-            }
-          >
-            Land Management
+                {/* Health Records removed (will live on animal detail) */}
+              </div>
+            )}
+          </div>
+
+          {/* LAND MANAGEMENT */}
+          <div>
+            <NavLink
+              to={ROUTES.land.root}
+              className={({ isActive }) =>
+                `block px-2 py-1 rounded font-semibold ${
+                  landActive || isActive
+                    ? "bg-green-100 text-green-800"
+                    : "text-stone-100 hover:bg-stone-700"
+                }`
+              }
+            >
+              Land Management
+            </NavLink>
+
+            {landActive && (
+              <div className="mt-1 space-y-1">
+                <NavLink to={ROUTES.land.zonesList} className={nestedLinkClasses}>
+                  Zones
+                </NavLink>
+
+                <NavLink to={ROUTES.land.pastures} className={nestedLinkClasses}>
+                  Pastures & Fences
+                </NavLink>
+
+                <NavLink to={ROUTES.land.water} className={nestedLinkClasses}>
+                  Water Points
+                </NavLink>
+
+                <NavLink to={ROUTES.land.soil} className={nestedLinkClasses}>
+                  Soil & Vegetation
+                </NavLink>
+
+                <NavLink to={ROUTES.land.grazing} className={nestedLinkClasses}>
+                  Grazing Plans
+                </NavLink>
+              </div>
+            )}
+          </div>
+
+          {/* HARDWARE MANAGEMENT */}
+          <div>
+            <NavLink
+              to={ROUTES.hardware.root}
+              className={({ isActive }) =>
+                `block px-2 py-1 rounded font-semibold ${
+                  hardwareActive || isActive
+                    ? "bg-green-100 text-green-800"
+                    : "text-stone-100 hover:bg-stone-700"
+                }`
+              }
+            >
+              Hardware Management
+            </NavLink>
+
+            {hardwareActive && (
+              <div className="mt-1 space-y-1">
+                <NavLink to={ROUTES.hardware.vehicles} className={nestedLinkClasses}>
+                  Vehicles
+                </NavLink>
+
+                <NavLink to={ROUTES.hardware.tractors} className={nestedLinkClasses}>
+                  Tractors
+                </NavLink>
+              </div>
+            )}
+          </div>
+
+          {/* SUPPLIES */}
+          <div>
+            <NavLink
+              to={ROUTES.supplies.root}
+              className={({ isActive }) =>
+                `block px-2 py-1 rounded font-semibold ${
+                  suppliesActive || isActive
+                    ? "bg-green-100 text-green-800"
+                    : "text-stone-100 hover:bg-stone-700"
+                }`
+              }
+            >
+              Supplies & Consumables
+            </NavLink>
+
+            {suppliesActive && (
+              <div className="mt-1 space-y-1">
+                <NavLink to={ROUTES.supplies.feed} className={nestedLinkClasses}>
+                  Feed
+                </NavLink>
+
+                <NavLink to={ROUTES.supplies.minerals} className={nestedLinkClasses}>
+                  Minerals
+                </NavLink>
+
+                <NavLink to={ROUTES.supplies.medications} className={nestedLinkClasses}>
+                  Medications
+                </NavLink>
+
+                <NavLink to={ROUTES.supplies.fuel} className={nestedLinkClasses}>
+                  Fuel
+                </NavLink>
+
+                <NavLink to={ROUTES.supplies.tools} className={nestedLinkClasses}>
+                  Tools
+                </NavLink>
+              </div>
+            )}
+          </div>
+
+          {/* SERVICES */}
+          <div>
+            <NavLink
+              to={ROUTES.services.root}
+              className={({ isActive }) =>
+                `block px-2 py-1 rounded font-semibold ${
+                  servicesActive || isActive
+                    ? "bg-green-100 text-green-800"
+                    : "text-stone-100 hover:bg-stone-700"
+                }`
+              }
+            >
+              Services & Suppliers
+            </NavLink>
+
+            {servicesActive && (
+              <div className="mt-1 space-y-1">
+                <NavLink to={ROUTES.services.vets} className={nestedLinkClasses}>
+                  Vets
+                </NavLink>
+
+                <NavLink to={ROUTES.services.specialists} className={nestedLinkClasses}>
+                  Specialists
+                </NavLink>
+
+                <NavLink to={ROUTES.services.feedSuppliers} className={nestedLinkClasses}>
+                  Feed Suppliers
+                </NavLink>
+
+                <NavLink to={ROUTES.services.contractors} className={nestedLinkClasses}>
+                  Contractors
+                </NavLink>
+
+                <NavLink to={ROUTES.services.equipmentRentals} className={nestedLinkClasses}>
+                  Equipment Rentals
+                </NavLink>
+              </div>
+            )}
+          </div>
+
+          {/* REPORTS */}
+          <NavLink to={ROUTES.reports.root} className={linkClasses}>
+            Reports & Analytics
           </NavLink>
 
-          {landActive && (
-            <div className="mt-1 space-y-1">
-              <NavLink to={ROUTES.land.zonesList} className={nestedLinkClasses}>
-                Zones
-              </NavLink>
+          {/* TASKS */}
+          <div>
+            <NavLink
+              to={ROUTES.tasks.root}
+              className={({ isActive }) =>
+                `block px-2 py-1 rounded font-semibold ${
+                  tasksActive || isActive
+                    ? "bg-green-100 text-green-800"
+                    : "text-stone-100 hover:bg-stone-700"
+                }`
+              }
+            >
+              Tasks & Scheduling
+            </NavLink>
 
-              <NavLink to={ROUTES.land.pastures} className={nestedLinkClasses}>
-                Pastures & Fences
-              </NavLink>
+            {tasksActive && (
+              <div className="mt-1 space-y-1">
+                <NavLink to={ROUTES.tasks.manage} className={nestedLinkClasses}>
+                  Task Management
+                </NavLink>
 
-              <NavLink to={ROUTES.land.water} className={nestedLinkClasses}>
-                Water Points
-              </NavLink>
+                <NavLink to={ROUTES.tasks.appointments} className={nestedLinkClasses}>
+                  Appointments
+                </NavLink>
 
-              <NavLink to={ROUTES.land.soil} className={nestedLinkClasses}>
-                Soil & Vegetation
-              </NavLink>
+                <NavLink to={ROUTES.tasks.calendar} className={nestedLinkClasses}>
+                  Calendar View
+                </NavLink>
+              </div>
+            )}
+          </div>
 
-              <NavLink to={ROUTES.land.grazing} className={nestedLinkClasses}>
-                Grazing Plans
-              </NavLink>
-            </div>
-          )}
-        </div>
-
-        {/* HARDWARE MANAGEMENT */}
-        <div>
-          <NavLink
-            to={ROUTES.hardware.root}
-            className={({ isActive }) =>
-              `block px-2 py-1 rounded font-semibold ${
-                hardwareActive || isActive
-                  ? "bg-green-100 text-green-800"
-                  : "text-stone-100 hover:bg-stone-700"
-              }`
-            }
-          >
-            Hardware Management
+          {/* SOPs */}
+          <NavLink to={ROUTES.sops.root} className={linkClasses}>
+            Standard Operating Procedures
           </NavLink>
 
-          {hardwareActive && (
-            <div className="mt-1 space-y-1">
-              <NavLink to={ROUTES.hardware.vehicles} className={nestedLinkClasses}>
-                Vehicles
-              </NavLink>
+          {/* ADMIN */}
+          <div>
+            <NavLink
+              to={ROUTES.admin.root}
+              className={({ isActive }) =>
+                `block px-2 py-1 rounded font-semibold ${
+                  adminActive || isActive
+                    ? "bg-green-100 text-green-800"
+                    : "text-stone-100 hover:bg-stone-700"
+                }`
+              }
+            >
+              Administration
+            </NavLink>
 
-              <NavLink to={ROUTES.hardware.tractors} className={nestedLinkClasses}>
-                Tractors
-              </NavLink>
-            </div>
-          )}
-        </div>
+            {adminActive && (
+              <div className="mt-1 space-y-1">
+                <NavLink to={ROUTES.admin.ranch} className={nestedLinkClasses}>
+                  Ranch Settings
+                </NavLink>
 
-        {/* SUPPLIES */}
-        <div>
-          <NavLink
-            to={ROUTES.supplies.root}
-            className={({ isActive }) =>
-              `block px-2 py-1 rounded font-semibold ${
-                suppliesActive || isActive
-                  ? "bg-green-100 text-green-800"
-                  : "text-stone-100 hover:bg-stone-700"
-              }`
-            }
-          >
-            Supplies & Consumables
-          </NavLink>
+                <NavLink to={ROUTES.admin.users} className={nestedLinkClasses}>
+                  User Management
+                </NavLink>
 
-          {suppliesActive && (
-            <div className="mt-1 space-y-1">
-              <NavLink to={ROUTES.supplies.feed} className={nestedLinkClasses}>
-                Feed
-              </NavLink>
+                <NavLink to={ROUTES.admin.billing} className={nestedLinkClasses}>
+                  Billing
+                </NavLink>
 
-              <NavLink to={ROUTES.supplies.minerals} className={nestedLinkClasses}>
-                Minerals
-              </NavLink>
-
-              <NavLink to={ROUTES.supplies.medications} className={nestedLinkClasses}>
-                Medications
-              </NavLink>
-
-              <NavLink to={ROUTES.supplies.fuel} className={nestedLinkClasses}>
-                Fuel
-              </NavLink>
-
-              <NavLink to={ROUTES.supplies.tools} className={nestedLinkClasses}>
-                Tools
-              </NavLink>
-            </div>
-          )}
-        </div>
-
-        {/* SERVICES */}
-        <div>
-          <NavLink
-            to={ROUTES.services.root}
-            className={({ isActive }) =>
-              `block px-2 py-1 rounded font-semibold ${
-                servicesActive || isActive
-                  ? "bg-green-100 text-green-800"
-                  : "text-stone-100 hover:bg-stone-700"
-              }`
-            }
-          >
-            Services & Suppliers
-          </NavLink>
-
-          {servicesActive && (
-            <div className="mt-1 space-y-1">
-              <NavLink to={ROUTES.services.vets} className={nestedLinkClasses}>
-                Vets
-              </NavLink>
-
-              <NavLink to={ROUTES.services.specialists} className={nestedLinkClasses}>
-                Specialists
-              </NavLink>
-
-              <NavLink to={ROUTES.services.feedSuppliers} className={nestedLinkClasses}>
-                Feed Suppliers
-              </NavLink>
-
-              <NavLink to={ROUTES.services.contractors} className={nestedLinkClasses}>
-                Contractors
-              </NavLink>
-
-              <NavLink to={ROUTES.services.equipmentRentals} className={nestedLinkClasses}>
-                Equipment Rentals
-              </NavLink>
-            </div>
-          )}
-        </div>
-
-        {/* REPORTS */}
-        <NavLink to={ROUTES.reports.root} className={linkClasses}>
-          Reports & Analytics
-        </NavLink>
-
-        {/* TASKS */}
-        <div>
-          <NavLink
-            to={ROUTES.tasks.root}
-            className={({ isActive }) =>
-              `block px-2 py-1 rounded font-semibold ${
-                tasksActive || isActive
-                  ? "bg-green-100 text-green-800"
-                  : "text-stone-100 hover:bg-stone-700"
-              }`
-            }
-          >
-            Tasks & Scheduling
-          </NavLink>
-
-          {tasksActive && (
-            <div className="mt-1 space-y-1">
-              <NavLink to={ROUTES.tasks.manage} className={nestedLinkClasses}>
-                Task Management
-              </NavLink>
-
-              <NavLink to={ROUTES.tasks.appointments} className={nestedLinkClasses}>
-                Appointments
-              </NavLink>
-
-              <NavLink to={ROUTES.tasks.calendar} className={nestedLinkClasses}>
-                Calendar View
-              </NavLink>
-            </div>
-          )}
-        </div>
-
-        {/* SOPs */}
-        <NavLink to={ROUTES.sops.root} className={linkClasses}>
-          Standard Operating Procedures
-        </NavLink>
-
-        {/* ADMIN */}
-        <div>
-          <NavLink
-            to={ROUTES.admin.root}
-            className={({ isActive }) =>
-              `block px-2 py-1 rounded font-semibold ${
-                adminActive || isActive
-                  ? "bg-green-100 text-green-800"
-                  : "text-stone-100 hover:bg-stone-700"
-              }`
-            }
-          >
-            Administration
-          </NavLink>
-
-          {adminActive && (
-            <div className="mt-1 space-y-1">
-              <NavLink to={ROUTES.admin.ranch} className={nestedLinkClasses}>
-                Ranch Settings
-              </NavLink>
-
-              <NavLink to={ROUTES.admin.users} className={nestedLinkClasses}>
-                User Management
-              </NavLink>
-
-              <NavLink to={ROUTES.admin.billing} className={nestedLinkClasses}>
-                Billing
-              </NavLink>
-
-              <NavLink to={ROUTES.admin.accounting} className={nestedLinkClasses}>
-                Accounting
-              </NavLink>
-            </div>
-          )}
-        </div>
+                <NavLink to={ROUTES.admin.accounting} className={nestedLinkClasses}>
+                  Accounting
+                </NavLink>
+              </div>
+            )}
+          </div>
         </div>
       </nav>
 
