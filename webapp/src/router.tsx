@@ -1,4 +1,4 @@
-// router.tsx
+// webapp/src/router.tsx
 import { createBrowserRouter } from "react-router-dom";
 import { Shell } from "./components/layout/Shell";
 import { ROUTES } from "./routes";
@@ -21,6 +21,7 @@ import RanchOverviewPage from "./modules/ranch/pages/RanchOverviewPage";
 import ListHerdPage from "./modules/herd-management/pages/ListHerdPage";
 import CreateHerdPage from "./modules/herd-management/pages/CreateHerdPage";
 import AnimalInventoryListPage from "./modules/herd-management/pages/AnimalInventoryListPage";
+import AnimalIntakeExistingInventoryPage from "./modules/herd-management/pages/AnimalIntakeExistingInventoryPage";
 
 // Land
 import LandManagementPage from "./modules/land-management/pages/LandManagementPage";
@@ -90,9 +91,12 @@ export const router = createBrowserRouter([
 
           // Animals (Inventory is now first-class)
           { path: "herd/animals", element: <AnimalInventoryListPage /> },
+
+          // Intake (Existing Inventory)
+          { path: "herd/animals/intake/existing", element: <AnimalIntakeExistingInventoryPage /> },
+
           // future:
           // { path: "herd/animals/:animalId", element: <AnimalDetailPage /> },
-          // { path: "herd/animals/intake", element: <AnimalIntakePage /> },
 
           // Land
           { path: "land", element: <LandManagementPage /> },

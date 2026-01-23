@@ -3,10 +3,15 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 
 import { apiGet, apiPostJson, apiPutJson } from "@/lib/api";
 import { ROUTES } from "@/routes";
+
+import {
+  ANIMAL_SPECIES,
+  getBreedsForSpecies,
+  type AnimalSpecies,
+} from "@/components/lookups/animalLookups";
 
 type HerdPayload = {
   name: string;
@@ -19,13 +24,6 @@ type HerdPayload = {
   longDescription?: string;
 };
 
-const SPECIES = ["Cattle", "Bison"] as const;
-
-const BREEDS: Record<string, string[]> = {
-  Cattle: ["Angus", "Hereford", "Charolais", "Brahman", "Buelingo"],
-  Bison: ["Plains Bison", "Wood Bison"],
-};
-
 export default function CreateHerdPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -35,7 +33,8 @@ export default function CreateHerdPage() {
 
   const [name, setName] = useState("");
   const [shortDescription, setShortDescription] = useState("");
-  const [species, setSpecies] = useState<string>("");
+
+  const [species, setSpecies] = useState<AnimalSpecies | "">("");
   const [breed, setBreed] = useState<string>("");
 
   const [maleDesc, setMaleDesc] = useState("");
@@ -64,7 +63,11 @@ export default function CreateHerdPage() {
 
         setName(data?.name ?? "");
         setShortDescription(data?.shortDescription ?? "");
-        setSpecies(data?.species ?? "");
+
+        // Herd records might contain older strings; keep them if they exist, but normalize UI.
+        const loadedSpecies = (data?.species ?? "") as string;
+        setSpecies((loadedSpecies as AnimalSpecies) || "");
+
         setBreed(data?.breed ?? "");
 
         setMaleDesc(data?.maleDesc ?? "");
@@ -86,13 +89,20 @@ export default function CreateHerdPage() {
   }, [isEdit, herdId]);
 
   const breedOptions = useMemo(() => {
-    return species ? BREEDS[species] ?? [] : [];
+    if (!species) return [];
+    return getBreedsForSpecies(species);
   }, [species]);
 
   // When species changes, reset breed if it no longer applies
   useEffect(() => {
-    if (!species) return;
-    if (breed && !breedOptions.includes(breed)) setBreed("");
+    if (!species) {
+      if (breed) setBreed("");
+      return;
+    }
+    if (!breed) return;
+
+    const valid = breedOptions.some((b) => b.value === breed);
+    if (!valid) setBreed("");
   }, [species, breed, breedOptions]);
 
   const canSubmit = useMemo(() => {
@@ -109,8 +119,11 @@ export default function CreateHerdPage() {
     const payload: HerdPayload = {
       name: name.trim(),
       shortDescription: shortDescription.trim() || undefined,
+
+      // Store stable identifiers from the lookup table (e.g. "bison", "buelingo")
       species: species || undefined,
       breed: breed || undefined,
+
       maleDesc: maleDesc.trim() || undefined,
       femaleDesc: femaleDesc.trim() || undefined,
       babyDesc: babyDesc.trim() || undefined,
@@ -126,8 +139,6 @@ export default function CreateHerdPage() {
         setBanner("Herd created successfully!");
       }
 
-      // Go back to list after a brief tick so the banner shows if you want.
-      // If you prefer immediate navigation, remove setTimeout.
       setTimeout(() => {
         navigate(ROUTES.herd.list, { replace: true });
       }, 250);
@@ -143,11 +154,7 @@ export default function CreateHerdPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">{isEdit ? "Edit Herd" : "Create Herd"}</h1>
 
-        <Button
-          variant="outline"
-          onClick={() => navigate(ROUTES.herd.list)}
-          disabled={loading}
-        >
+        <Button variant="outline" onClick={() => navigate(ROUTES.herd.list)} disabled={loading}>
           Back
         </Button>
       </div>
@@ -166,13 +173,23 @@ export default function CreateHerdPage() {
 
       <section className="space-y-4 border p-6 rounded-lg bg-white">
         <div className="space-y-2">
-          <Label>Herd Name *</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} disabled={loading} />
+          <label htmlFor="herdName" className="text-sm font-medium">
+            Herd Name *
+          </label>
+          <Input
+            id="herdName"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={loading}
+          />
         </div>
 
         <div className="space-y-2">
-          <Label>Quick Description</Label>
+          <label htmlFor="shortDescription" className="text-sm font-medium">
+            Quick Description
+          </label>
           <Input
+            id="shortDescription"
             value={shortDescription}
             onChange={(e) => setShortDescription(e.target.value)}
             disabled={loading}
@@ -181,25 +198,31 @@ export default function CreateHerdPage() {
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label>Species</Label>
+            <label htmlFor="species" className="text-sm font-medium">
+              Species
+            </label>
             <select
+              id="species"
               className="w-full h-10 rounded-md border px-3 bg-white"
               value={species}
-              onChange={(e) => setSpecies(e.target.value)}
+              onChange={(e) => setSpecies((e.target.value as AnimalSpecies) || "")}
               disabled={loading}
             >
               <option value="">Select species…</option>
-              {SPECIES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+              {ANIMAL_SPECIES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
                 </option>
               ))}
             </select>
           </div>
 
           <div className="space-y-2">
-            <Label>Breed</Label>
+            <label htmlFor="breed" className="text-sm font-medium">
+              Breed
+            </label>
             <select
+              id="breed"
               className="w-full h-10 rounded-md border px-3 bg-white"
               value={breed}
               onChange={(e) => setBreed(e.target.value)}
@@ -207,8 +230,8 @@ export default function CreateHerdPage() {
             >
               <option value="">{species ? "Select breed…" : "Select species first…"}</option>
               {breedOptions.map((b) => (
-                <option key={b} value={b}>
-                  {b}
+                <option key={b.value} value={b.value}>
+                  {b.label}
                 </option>
               ))}
             </select>
@@ -217,22 +240,46 @@ export default function CreateHerdPage() {
 
         <div className="grid grid-cols-3 gap-4">
           <div className="space-y-2">
-            <Label>Male label</Label>
-            <Input value={maleDesc} onChange={(e) => setMaleDesc(e.target.value)} disabled={loading} />
+            <label htmlFor="maleDesc" className="text-sm font-medium">
+              Male label
+            </label>
+            <Input
+              id="maleDesc"
+              value={maleDesc}
+              onChange={(e) => setMaleDesc(e.target.value)}
+              disabled={loading}
+            />
           </div>
           <div className="space-y-2">
-            <Label>Female label</Label>
-            <Input value={femaleDesc} onChange={(e) => setFemaleDesc(e.target.value)} disabled={loading} />
+            <label htmlFor="femaleDesc" className="text-sm font-medium">
+              Female label
+            </label>
+            <Input
+              id="femaleDesc"
+              value={femaleDesc}
+              onChange={(e) => setFemaleDesc(e.target.value)}
+              disabled={loading}
+            />
           </div>
           <div className="space-y-2">
-            <Label>Baby label</Label>
-            <Input value={babyDesc} onChange={(e) => setBabyDesc(e.target.value)} disabled={loading} />
+            <label htmlFor="babyDesc" className="text-sm font-medium">
+              Baby label
+            </label>
+            <Input
+              id="babyDesc"
+              value={babyDesc}
+              onChange={(e) => setBabyDesc(e.target.value)}
+              disabled={loading}
+            />
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label>Notes</Label>
+          <label htmlFor="notes" className="text-sm font-medium">
+            Notes
+          </label>
           <textarea
+            id="notes"
             className="w-full min-h-35 rounded-md border p-3 bg-white"
             value={longDescription}
             onChange={(e) => setLongDescription(e.target.value)}

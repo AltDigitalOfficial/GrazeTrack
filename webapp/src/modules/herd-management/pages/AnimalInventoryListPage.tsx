@@ -123,8 +123,16 @@ export default function AnimalInventoryListPage() {
             Refresh
           </Button>
 
-          <Button asChild>
-            <Link to="/herd/animals/intake">Add Animal</Link>
+          <Button asChild variant="secondary" aria-label="Start birth intake">
+            <Link to="/herd/animals/intake/birth">Birth</Link>
+          </Button>
+
+          <Button asChild variant="secondary" aria-label="Start purchase intake">
+            <Link to="/herd/animals/intake/purchase">Purchase</Link>
+          </Button>
+
+          <Button asChild variant="secondary" aria-label="Start existing animal intake">
+            <Link to="/herd/animals/intake/existing">Existing Animal</Link>
           </Button>
         </div>
       </div>

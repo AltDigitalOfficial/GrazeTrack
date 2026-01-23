@@ -168,11 +168,6 @@ export const animals = pgTable(
     birthDate: date("birth_date"),
     birthDateIsEstimated: boolean("birth_date_is_estimated").notNull().default(false),
 
-    // tag fields (NOT unique per ranch)
-    tagNumber: text("tag_number"),
-    tagColor: text("tag_color"),
-    tagEar: text("tag_ear"), // left | right (enforced in routes)
-
     // status
     status: text("status").notNull().default("active"), // active | sold | deceased | transferred
     statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
@@ -191,7 +186,34 @@ export const animals = pgTable(
   (t) => ({
     statusIdx: index("animals_status_idx").on(t.status),
     speciesIdx: index("animals_species_idx").on(t.species),
-    tagNumberIdx: index("animals_tag_number_idx").on(t.tagNumber),
+  })
+);
+/* =========================================================================================
+ * Animal ↔ Tag History (time-ranged)
+ * ========================================================================================= */
+
+export const animalTagHistory = pgTable(
+  "animal_tag_history",
+  {
+    id: pgUuid("id").primaryKey(),
+
+    animalId: pgUuid("animal_id").notNull(),
+
+    tagNumber: text("tag_number"),
+    tagColor: text("tag_color"),
+    tagEar: text("tag_ear"),
+
+    changeReason: text("change_reason"),
+    changedBy: text("changed_by_user_id"),
+
+    startAt: timestamp("start_at", { withTimezone: true }).defaultNow().notNull(),
+    endAt: timestamp("end_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    animalIdx: index("animal_tag_history_animal_idx").on(t.animalId),
+    animalCurrentIdx: index("animal_tag_history_current_idx").on(t.animalId, t.endAt),
   })
 );
 

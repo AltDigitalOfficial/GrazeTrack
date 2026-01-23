@@ -1,4 +1,4 @@
-// routes.tsx
+// webapp/src/routes.tsx
 export const ROUTES = {
   auth: {
     login: "/login",
@@ -17,7 +17,12 @@ export const ROUTES = {
     // Animals (Inventory)
     animals: "/herd/animals",
     animalDetail: "/herd/animals/:animalId",
-    animalIntake: "/herd/animals/intake",
+
+    // Intake (future-safe, explicit)
+    animalIntakeRoot: "/herd/animals/intake",
+    animalIntakeBirth: "/herd/animals/intake/birth",
+    animalIntakePurchase: "/herd/animals/intake/purchase",
+    animalIntakeExisting: "/herd/animals/intake/existing",
   },
 
   land: {

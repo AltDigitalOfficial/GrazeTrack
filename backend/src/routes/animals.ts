@@ -1,7 +1,7 @@
 // backend/src/routes/animals.ts
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 import { db } from "../db";
@@ -14,6 +14,7 @@ import {
   animalNotes,
   animalPhotos,
   animalPhotoTags,
+  animalTagHistory,
   herds,
   userRanches,
 } from "../db/schema";
@@ -24,8 +25,7 @@ import { requireAuth } from "../plugins/requireAuth";
  * ------------------------------------------------------------------------------------------------ */
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  // Matches your existing backend convention (e.g., medications):
-  // pick the first ranch membership row.
+  // Pick the first ranch membership row.
   const rows = await db
     .select({ ranchId: userRanches.ranchId })
     .from(userRanches)
@@ -53,13 +53,7 @@ async function requireHerdWithRanchAccess(
   const accessRows = await db
     .select({ userId: userRanches.userId })
     .from(userRanches)
-    .where(
-      and(
-        eq(userRanches.userId, userId),
-        // ✅ ensure uuid-to-uuid comparison (cast param)
-        sql`${userRanches.ranchId} = ${herdRow.ranchId}::uuid`
-      )
-    )
+    .where(and(eq(userRanches.userId, userId), eq(userRanches.ranchId, herdRow.ranchId)))
     .limit(1);
 
   if (!accessRows[0]) {
@@ -71,7 +65,7 @@ async function requireHerdWithRanchAccess(
 
 /**
  * For animal-specific operations, derive ranch scope from CURRENT herd membership.
- * This prevents any cross-ranch access regardless of "active ranch" selection.
+ * This prevents cross-ranch access regardless of any "active ranch" concept.
  */
 async function requireCurrentMembershipScope(
   userId: string,
@@ -103,34 +97,28 @@ async function requireCurrentMembershipScope(
     throw Object.assign(new Error("Herd not found for current membership"), { statusCode: 404 });
   }
 
-  // Enforce ranch membership
   const accessRows = await db
     .select({ userId: userRanches.userId })
     .from(userRanches)
-    .where(
-      and(
-        eq(userRanches.userId, userId),
-        // ✅ ensure uuid-to-uuid comparison (cast param)
-        sql`${userRanches.ranchId} = ${herdRow.ranchId}::uuid`
-      )
-    )
+    .where(and(eq(userRanches.userId, userId), eq(userRanches.ranchId, herdRow.ranchId)))
     .limit(1);
 
   if (!accessRows[0]) {
     throw Object.assign(new Error("Forbidden: no access to this ranch"), { statusCode: 403 });
   }
 
-  return { ranchId: herdRow.ranchId, herdId: membership.herdId, membershipId: membership.membershipId };
+  return {
+    ranchId: herdRow.ranchId,
+    herdId: membership.herdId,
+    membershipId: membership.membershipId,
+  };
 }
 
 function sendError(reply: any, err: any) {
   const statusCode = typeof err?.statusCode === "number" ? err.statusCode : 500;
 
   const pgMessage =
-    err?.cause?.message ||
-    err?.cause?.toString?.() ||
-    err?.originalError?.message ||
-    null;
+    err?.cause?.message || err?.cause?.toString?.() || err?.originalError?.message || null;
 
   if (statusCode === 500) {
     reply.log.error({ err, pgMessage }, "animalsRoutes error");
@@ -139,6 +127,44 @@ function sendError(reply: any, err: any) {
   return reply.status(statusCode).send({
     error: err?.message ?? "Unexpected server error",
     pg: pgMessage,
+  });
+}
+
+async function insertCurrentTag(args: {
+  tx: any;
+  animalId: string;
+  tagNumber: string | null;
+  tagColor: string | null;
+  tagEar: "left" | "right" | null;
+  at: Date;
+  changeReason: string;
+  // UUID user id (future). For now we store null (Option B).
+  changedByUserId: string | null;
+}) {
+  const { tx, animalId, tagNumber, tagColor, tagEar, at, changeReason, changedByUserId } = args;
+
+  // If no tag fields provided, do nothing.
+  const hasAny = !!(tagNumber || tagColor || tagEar);
+  if (!hasAny) return;
+
+  // End any current tag (defensive; should not exist on create)
+  await tx
+    .update(animalTagHistory)
+    .set({ endAt: at })
+    .where(and(eq(animalTagHistory.animalId, animalId), isNull(animalTagHistory.endAt)));
+
+  // Insert new current tag
+  await tx.insert(animalTagHistory).values({
+    id: uuid(),
+    animalId,
+    tagNumber,
+    tagColor,
+    tagEar,
+    startAt: at,
+    endAt: null,
+    changeReason,
+    changedByUserId, // must be uuid or null; for now we pass null
+    createdAt: at,
   });
 }
 
@@ -160,6 +186,7 @@ const BaseAnimalSchema = z.object({
   birthDate: z.string().optional().nullable(), // YYYY-MM-DD
   birthDateIsEstimated: z.boolean().optional(),
 
+  // Tag info is now stored in animal_tag_history
   tagNumber: z.string().optional().nullable(),
   tagColor: z.string().optional().nullable(),
   tagEar: TagEarSchema.optional().nullable(),
@@ -197,18 +224,18 @@ const ListAnimalsQuerySchema = z.object({
 });
 
 const CreateMeasurementSchema = z.object({
-  measurementType: z.string().min(1), // weight | temperature | body_condition_score | other | etc
+  measurementType: z.string().min(1),
   valueNumber: z.number().optional().nullable(),
   valueText: z.string().optional().nullable(),
   unit: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
-  measuredAt: z.string().optional().nullable(), // ISO datetime
+  measuredAt: z.string().optional().nullable(),
 });
 
 const CreateNoteSchema = z.object({
-  noteType: z.string().optional().nullable(), // health | behavior | handling | general
+  noteType: z.string().optional().nullable(),
   content: z.string().min(1),
-  noteAt: z.string().optional().nullable(), // ISO datetime
+  noteAt: z.string().optional().nullable(),
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -219,11 +246,10 @@ export async function animalsRoutes(app: FastifyInstance) {
   /**
    * GET /api/animals
    *
-   * Lists animals for the user's "active" ranch (first user_ranches row),
+   * Lists animals for the user's "active ranch" (first user_ranches row),
    * based on CURRENT herd membership (end_at is null).
    *
-   * Optional:
-   * - ?herdId=<uuid> to filter to a specific herd (must be in the same active ranch).
+   * Tag columns are derived from animal_tag_history where end_at is null.
    */
   app.get("/animals", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -249,8 +275,7 @@ export async function animalsRoutes(app: FastifyInstance) {
       }
 
       const conditions = [
-        // ✅ ensure uuid-to-uuid comparison (cast param)
-        sql`${herds.ranchId} = ${ranchId}::uuid`,
+        eq(herds.ranchId, ranchId),
         isNull(animalHerdMembership.endAt),
         ...(herdId ? [eq(herds.id, herdId)] : []),
       ];
@@ -263,9 +288,6 @@ export async function animalsRoutes(app: FastifyInstance) {
           sex: animals.sex,
           birthDate: animals.birthDate,
           birthDateIsEstimated: animals.birthDateIsEstimated,
-          tagNumber: animals.tagNumber,
-          tagColor: animals.tagColor,
-          tagEar: animals.tagEar,
           status: animals.status,
           neutered: animals.neutered,
           neuteredDate: animals.neuteredDate,
@@ -275,10 +297,19 @@ export async function animalsRoutes(app: FastifyInstance) {
 
           herdId: herds.id,
           herdName: herds.name,
+
+          // current tag (nullable)
+          tagNumber: animalTagHistory.tagNumber,
+          tagColor: animalTagHistory.tagColor,
+          tagEar: animalTagHistory.tagEar,
         })
         .from(animalHerdMembership)
         .innerJoin(herds, eq(animalHerdMembership.herdId, herds.id))
         .innerJoin(animals, eq(animalHerdMembership.animalId, animals.id))
+        .leftJoin(
+          animalTagHistory,
+          and(eq(animalTagHistory.animalId, animals.id), isNull(animalTagHistory.endAt))
+        )
         .where(and(...conditions))
         .orderBy(desc(animals.createdAt));
 
@@ -295,14 +326,7 @@ export async function animalsRoutes(app: FastifyInstance) {
   /**
    * GET /api/animals/:animalId
    *
-   * Animal detail payload:
-   * - animal core fields
-   * - current membership + herd + ranch
-   * - intake events (append-only)
-   * - measurements (recent)
-   * - notes (recent)
-   * - photos that include this animal (via tags join)
-   * - documents for this animal
+   * Includes tag history (and current tag derived from end_at is null).
    */
   app.get("/animals/:animalId", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -322,6 +346,15 @@ export async function animalsRoutes(app: FastifyInstance) {
         .limit(1);
 
       const herd = herdRows[0] ?? null;
+
+      const tagHistory = await db
+        .select()
+        .from(animalTagHistory)
+        .where(eq(animalTagHistory.animalId, animalId))
+        .orderBy(desc(animalTagHistory.startAt), desc(animalTagHistory.createdAt))
+        .limit(200);
+
+      const currentTag = tagHistory.find((t: any) => t.endAt == null) ?? null;
 
       const intakeEvents = await db
         .select()
@@ -344,8 +377,6 @@ export async function animalsRoutes(app: FastifyInstance) {
         .orderBy(desc(animalNotes.noteAt), desc(animalNotes.createdAt))
         .limit(100);
 
-      // Photos that include this animal:
-      // animal_photo_tags (animal_id) -> animal_photos (photo_id)
       const taggedPhotos = await db
         .select({
           photoId: animalPhotos.id,
@@ -375,7 +406,6 @@ export async function animalsRoutes(app: FastifyInstance) {
         .orderBy(desc(animalPhotos.createdAt))
         .limit(200);
 
-      // Documents
       const documents = await db
         .select()
         .from(animalDocuments)
@@ -391,6 +421,8 @@ export async function animalsRoutes(app: FastifyInstance) {
           membershipId: scope.membershipId,
           herd,
         },
+        currentTag,
+        tagHistory,
         intakeEvents,
         measurements,
         notes,
@@ -433,10 +465,6 @@ export async function animalsRoutes(app: FastifyInstance) {
           birthDate: data.birthDate ?? null,
           birthDateIsEstimated: data.birthDateIsEstimated ?? false,
 
-          tagNumber: data.tagNumber ?? null,
-          tagColor: data.tagColor ?? null,
-          tagEar: data.tagEar ?? null,
-
           status: data.status ?? "active",
           statusChangedAt: data.statusChangedAt ? new Date(data.statusChangedAt) : null,
 
@@ -478,6 +506,17 @@ export async function animalsRoutes(app: FastifyInstance) {
           purchaseCurrency: null,
 
           createdAt: now,
+        });
+
+        await insertCurrentTag({
+          tx,
+          animalId,
+          tagNumber: data.tagNumber ?? null,
+          tagColor: data.tagColor ?? null,
+          tagEar: (data.tagEar ?? null) as "left" | "right" | null,
+          at: now,
+          changeReason: "birth_intake",
+          changedByUserId: null, // Option B for now; column is uuid
         });
       });
 
@@ -524,15 +563,12 @@ export async function animalsRoutes(app: FastifyInstance) {
           birthDate: data.birthDate ?? null,
           birthDateIsEstimated: data.birthDateIsEstimated ?? false,
 
-          tagNumber: data.tagNumber ?? null,
-          tagColor: data.tagColor ?? null,
-          tagEar: data.tagEar ?? null,
-
           status: data.status ?? "active",
           statusChangedAt: data.statusChangedAt ? new Date(data.statusChangedAt) : null,
 
-          damAnimalId: data.damAnimalId ?? null,
-          sireAnimalId: data.sireAnimalId ?? null,
+          // lineage unknown on purchase (for now)
+          damAnimalId: null,
+          sireAnimalId: null,
 
           neutered: data.neutered ?? false,
           neuteredDate: data.neuteredDate ?? null,
@@ -570,6 +606,17 @@ export async function animalsRoutes(app: FastifyInstance) {
 
           createdAt: now,
         });
+
+        await insertCurrentTag({
+          tx,
+          animalId,
+          tagNumber: data.tagNumber ?? null,
+          tagColor: data.tagColor ?? null,
+          tagEar: (data.tagEar ?? null) as "left" | "right" | null,
+          at: now,
+          changeReason: "purchase_intake",
+          changedByUserId: null, // Option B for now; column is uuid
+        });
       });
 
       return reply.status(201).send({
@@ -600,10 +647,8 @@ export async function animalsRoutes(app: FastifyInstance) {
       }
 
       const scope = await requireCurrentMembershipScope(req.auth!.userId, animalId);
-
       const m = parsed.data;
 
-      // Require at least one of valueNumber/valueText
       if ((m.valueNumber == null || Number.isNaN(m.valueNumber)) && !m.valueText) {
         return reply.status(400).send({ error: "Provide valueNumber or valueText" });
       }
