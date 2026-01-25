@@ -18,7 +18,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/components/ui/use-toast";
 
 import { apiPost } from "@/lib/api";
-import { ANIMAL_SPECIES, type AnimalSpecies } from "@/components/lookups/animalLookups";
+import {
+  ANIMAL_SPECIES,
+  getBreedsForSpecies,
+  type AnimalSpecies,
+} from "@/components/lookups/animalLookups";
 
 // TODO: confirm backend route
 const EXISTING_INVENTORY_INTAKE_ENDPOINT = "/api/animal-intake/existing-inventory";
@@ -46,9 +50,13 @@ const SpeciesSchema = z.custom<AnimalSpecies>(
   { message: "Species is required" }
 );
 
-const formSchema = z.object({
+// Base object schema
+const baseSchema = z.object({
   species: SpeciesSchema,
-  breed: z.string().trim().min(1, "Breed is required").max(100, "Breed is too long"),
+
+  // Breed is a stored identifier from the lookup table (e.g. "angus", "buelingo", "plains_bison")
+  breed: z.string().trim().min(1, "Breed is required"),
+
   sex: SexEnum,
 
   birthDate: z
@@ -78,6 +86,20 @@ const formSchema = z.object({
     }, { message: "Weight must be a positive number" }),
 
   notes: z.string().trim().max(2000, "Notes are too long").optional(),
+});
+
+// Cross-field validation: breed must belong to selected species
+const formSchema = baseSchema.superRefine((values, ctx) => {
+  const options = getBreedsForSpecies(values.species);
+  const valid = options.some((b) => b.value === values.breed);
+
+  if (!valid) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["breed"],
+      message: "Select a valid breed for the chosen species",
+    });
+  }
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -122,7 +144,9 @@ export default function AnimalIntakeExistingInventoryPage() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       species: "cattle",
-      breed: "",
+      // pick a sensible default breed for the default species (first option)
+      breed: getBreedsForSpecies("cattle")[0]?.value ?? "other",
+
       sex: "unknown",
       birthDate: "",
       isBirthDateEstimated: false,
@@ -134,6 +158,25 @@ export default function AnimalIntakeExistingInventoryPage() {
     },
     mode: "onBlur",
   });
+
+  const species = form.watch("species");
+  const birthDateValue = form.watch("birthDate");
+
+  const breedOptions = React.useMemo(() => {
+    return getBreedsForSpecies(species);
+  }, [species]);
+
+  // Ensure breed always stays valid when species changes
+  React.useEffect(() => {
+    const currentBreed = form.getValues("breed");
+    const valid = breedOptions.some((b) => b.value === currentBreed);
+
+    if (!valid) {
+      const nextBreed = breedOptions[0]?.value ?? "other";
+      form.setValue("breed", nextBreed, { shouldValidate: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [species, breedOptions]);
 
   const onSubmit: SubmitHandler<FormValues> = async (values) => {
     setIsSubmitting(true);
@@ -163,9 +206,13 @@ export default function AnimalIntakeExistingInventoryPage() {
         description: "Existing inventory intake was recorded successfully.",
       });
 
+      // Keep “one-by-one” speed: preserve species, reset other fields
+      const preservedSpecies = values.species;
+      const preservedBreedDefault = getBreedsForSpecies(preservedSpecies)[0]?.value ?? "other";
+
       form.reset({
-        species: values.species,
-        breed: "",
+        species: preservedSpecies,
+        breed: preservedBreedDefault,
         sex: "unknown",
         birthDate: "",
         isBirthDateEstimated: false,
@@ -197,8 +244,6 @@ export default function AnimalIntakeExistingInventoryPage() {
     }
   };
 
-  const birthDateValue = form.watch("birthDate");
-
   return (
     <div className="p-6">
       <div className="mx-auto w-full max-w-3xl space-y-4">
@@ -206,7 +251,7 @@ export default function AnimalIntakeExistingInventoryPage() {
           <CardHeader>
             <CardTitle>Animal Intake — Existing Inventory</CardTitle>
             <CardDescription>
-              Add one animal at a time to your inventory. Tags are stored historically.
+              Add one animal at a time to your inventory. Species and breed use the shared lookup table.
             </CardDescription>
           </CardHeader>
 
@@ -219,9 +264,10 @@ export default function AnimalIntakeExistingInventoryPage() {
                   </label>
                   <Select
                     value={form.getValues("species")}
-                    onValueChange={(val: string) =>
-                      form.setValue("species", val as AnimalSpecies, { shouldValidate: true })
-                    }
+                    onValueChange={(val: string) => {
+                      // set species + let effect auto-correct breed if needed
+                      form.setValue("species", val as AnimalSpecies, { shouldValidate: true });
+                    }}
                   >
                     <SelectTrigger id="species" className="mt-1">
                       <SelectValue placeholder="Select species" />
@@ -241,8 +287,23 @@ export default function AnimalIntakeExistingInventoryPage() {
                   <label htmlFor="breed" className="text-sm font-medium">
                     Breed
                   </label>
-                  {/* Next increment: convert this to a dropdown based on species, same as CreateHerdPage */}
-                  <Input id="breed" className="mt-1" placeholder="e.g., Angus" {...form.register("breed")} />
+                  <Select
+                    value={form.getValues("breed")}
+                    onValueChange={(val: string) =>
+                      form.setValue("breed", val, { shouldValidate: true })
+                    }
+                  >
+                    <SelectTrigger id="breed" className="mt-1" aria-label="Select breed">
+                      <SelectValue placeholder="Select breed" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {breedOptions.map((b) => (
+                        <SelectItem key={b.value} value={b.value}>
+                          {b.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {fieldErrorText(form.formState.errors.breed?.message)}
                 </div>
 
@@ -386,7 +447,7 @@ export default function AnimalIntakeExistingInventoryPage() {
                 </label>
                 <Textarea
                   id="notes"
-                  className="mt-1 min-h-27.5"
+                  className="mt-1 min-h-[110px]"
                   placeholder="Anything worth noting about this animal…"
                   {...form.register("notes")}
                 />
