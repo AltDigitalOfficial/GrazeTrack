@@ -6,13 +6,14 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ROUTES } from "@/routes";
 import { apiGet } from "@/lib/api";
-import { auth } from "@/lib/firebase";
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
 type HerdCounts = {
   male: number;
+  male_neut: number;
   female: number;
+  female_neut: number;
   baby: number;
 };
 
@@ -24,7 +25,9 @@ type HerdListItem = {
   breed: string | null;
 
   maleDesc: string | null;
+  male_neut_desc?: string | null;
   femaleDesc: string | null;
+  female_neut_desc?: string | null;
   babyDesc: string | null;
 
   longDescription: string | null;
@@ -32,24 +35,8 @@ type HerdListItem = {
   // backend may or may not send this yet
   isSystem?: boolean;
 
-  // placeholders until animals exist
   counts?: Partial<HerdCounts>;
 };
-
-async function deleteHerd(herdId: string) {
-  const user = auth.currentUser;
-  const token = user ? await user.getIdToken() : null;
-
-  const res = await fetch(`http://localhost:3001/api/herds/${herdId}`, {
-    method: "DELETE",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(txt || "Failed to delete herd");
-  }
-}
 
 export default function ListHerdPage() {
   const navigate = useNavigate();
@@ -58,20 +45,14 @@ export default function ListHerdPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [herds, setHerds] = useState<HerdListItem[]>([]);
 
-  const hasHerds = useMemo(() => herds.length > 0, [herds]);
-
   const load = async () => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      // IMPORTANT: api.ts already has API_BASE = http://localhost:3001/api
-      // so paths should look like "/herds", not "/api/herds"
       const data = await apiGet<HerdListItem[]>("/herds");
       setHerds(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      const msg =
-        typeof err?.message === "string" ? err.message : "Failed to load herds";
-      setErrorMsg(msg);
+      setErrorMsg(err?.message || "Failed to load herds");
       setHerds([]);
     } finally {
       setLoading(false);
@@ -80,33 +61,7 @@ export default function ListHerdPage() {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const onEdit = (herdId: string) => {
-    navigate(ROUTES.herd.create, { state: { herdId } });
-  };
-
-  const onDelete = async (herd: HerdListItem) => {
-    const isTransfer =
-      herd.isSystem === true || herd.name.trim().toLowerCase() === "transfer";
-    if (isTransfer) return;
-
-    const ok = window.confirm(
-      `Delete herd "${herd.name}"?\n\nThis can only succeed if the herd has no current animals.`
-    );
-    if (!ok) return;
-
-    try {
-      setErrorMsg(null);
-      await deleteHerd(herd.id);
-      await load();
-    } catch (err: any) {
-      const msg =
-        typeof err?.message === "string" ? err.message : "Failed to delete herd";
-      setErrorMsg(msg);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -127,152 +82,124 @@ export default function ListHerdPage() {
         </div>
       )}
 
-      {loading ? (
-        <div className="text-stone-600">Loading herds…</div>
-      ) : !hasHerds ? (
-        <div className="rounded-xl border bg-white p-8">
-          <div className="text-xl font-semibold">No herds found</div>
-          <div className="text-stone-600 mt-1">
-            Let’s add your first herd to get started.
-          </div>
-          <div className="mt-5">
-            <Button onClick={() => navigate(ROUTES.herd.create)}>
-              Create your first herd
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {herds.map((herd) => {
-            const isTransfer =
-              herd.isSystem === true ||
-              herd.name.trim().toLowerCase() === "transfer";
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        {herds.map((herd) => {
+          const isTransfer =
+            herd.isSystem === true ||
+            herd.name.trim().toLowerCase() === "transfer";
 
-            const maleLabel = herd.maleDesc || "Males";
-            const femaleLabel = herd.femaleDesc || "Females";
-            const babyLabel = herd.babyDesc || "Babies";
+          const maleLabel = herd.maleDesc || "Males";
+          const maleNeutLabel = herd.male_neut_desc || "Neutered males";
+          const femaleLabel = herd.femaleDesc || "Females";
+          const femaleNeutLabel = herd.female_neut_desc || "Neutered females";
+          const babyLabel = herd.babyDesc || "Babies";
 
-            return (
-              <Card
-                key={herd.id}
-                // Optional change #1: subtle hover shadow
-                className="relative group rounded-xl border bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
-              >
-                {/* Kebab menu (always above overlay) */}
-                <div className="absolute top-3 right-3 z-30">
-                  <DropdownMenu.Root>
-                    <DropdownMenu.Trigger asChild>
-                      <button
-                        type="button"
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-white hover:bg-stone-50"
-                        aria-label="Herd actions"
-                      >
-                        <MoreHorizontal className="h-5 w-5 text-stone-700" />
-                      </button>
-                    </DropdownMenu.Trigger>
-
-                    <DropdownMenu.Portal>
-                      <DropdownMenu.Content
-                        align="end"
-                        sideOffset={8}
-                        className="z-9999 min-w-40 rounded-md border bg-white p-1 shadow-md"
-                      >
-                        <DropdownMenu.Item
-                          onSelect={() => onEdit(herd.id)}
-                          className="cursor-pointer select-none rounded px-3 py-2 text-sm outline-none hover:bg-stone-100"
-                        >
-                          Edit
-                        </DropdownMenu.Item>
-
-                        {!isTransfer && (
-                          <DropdownMenu.Item
-                            onSelect={() => void onDelete(herd)}
-                            className="cursor-pointer select-none rounded px-3 py-2 text-sm outline-none hover:bg-stone-100 text-red-700"
-                          >
-                            Delete
-                          </DropdownMenu.Item>
-                        )}
-                      </DropdownMenu.Content>
-                    </DropdownMenu.Portal>
-                  </DropdownMenu.Root>
+          return (
+            <Card key={herd.id} className="rounded-xl border bg-white p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold">{herd.name}</h2>
+                  {herd.shortDescription ? (
+                    <p className="text-sm text-stone-600">{herd.shortDescription}</p>
+                  ) : null}
                 </div>
 
-                {/* Card content */}
-                <div className="space-y-3">
-                  <div className="pr-12">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-lg font-semibold">{herd.name}</h2>
-                      {isTransfer && (
-                        <span className="text-xs rounded-full border px-2 py-0.5 bg-stone-50 text-stone-700">
-                          System
-                        </span>
-                      )}
-                    </div>
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger asChild>
+                    <button
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white hover:bg-stone-50"
+                      aria-label="Open herd menu"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </DropdownMenu.Trigger>
 
-                    {herd.shortDescription ? (
-                      <div className="text-sm text-stone-600 mt-1">
-                        {herd.shortDescription}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-stone-400 mt-1">
-                        No short description
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="text-sm text-stone-700">
-                    <span className="font-semibold">Animal Type:</span>{" "}
-                    {[
-                      herd.species || "Unknown species",
-                      herd.breed || "Unknown breed",
-                    ].join(" • ")}
-                  </div>
-
-                  {/* Placeholder counts until animals exist */}
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <div className="font-semibold">
-                        {herd.counts?.male ?? 0}
-                      </div>
-                      <div className="text-stone-500">{maleLabel}</div>
-                    </div>
-
-                    <div>
-                      <div className="font-semibold">
-                        {herd.counts?.female ?? 0}
-                      </div>
-                      <div className="text-stone-500">{femaleLabel}</div>
-                    </div>
-
-                    <div>
-                      <div className="font-semibold">
-                        {herd.counts?.baby ?? 0}
-                      </div>
-                      <div className="text-stone-500">{babyLabel}</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Hover notes overlay (does NOT block kebab/menu) */}
-                {herd.longDescription && (
-                  <div
-                    // Optional change #2: soft fade + blur
-                    className="pointer-events-none absolute inset-0 rounded-xl bg-white/95 backdrop-blur-sm p-6 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                  <DropdownMenu.Content
+                    align="end"
+                    className="z-50 min-w-45 rounded-md border bg-white p-1 shadow-md"
                   >
-                    {/* leave space so the kebab area stays visually clear */}
-                    <div className="pr-12 pointer-events-auto">
-                      <div className="text-sm font-semibold">Notes</div>
-                      <div className="text-sm text-stone-700 mt-2 whitespace-pre-wrap">
-                        {herd.longDescription}
-                      </div>
+                    <DropdownMenu.Item
+                      className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
+                      onSelect={() => navigate(ROUTES.herd.edit, { state: { herdId: herd.id } })}
+                    >
+                      Edit herd
+                    </DropdownMenu.Item>
+
+                    <DropdownMenu.Item
+                      className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
+                      onSelect={() => navigate(ROUTES.herd.animals, { state: { herdId: herd.id } })}
+                    >
+                      View animals
+                    </DropdownMenu.Item>
+
+                    {isTransfer ? (
+                      <DropdownMenu.Item
+                        className="cursor-not-allowed rounded px-2 py-1.5 text-sm text-stone-400 outline-none"
+                        disabled
+                      >
+                        Transfer herd (system)
+                      </DropdownMenu.Item>
+                    ) : (
+                      <DropdownMenu.Item
+                        className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
+                        onSelect={() => {
+                          // placeholder: transfer action can be wired later
+                        }}
+                      >
+                        Transfer herd
+                      </DropdownMenu.Item>
+                    )}
+                  </DropdownMenu.Content>
+                </DropdownMenu.Root>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <div className="text-sm text-stone-500">
+                  {herd.species ? `${herd.species}${herd.breed ? ` • ${herd.breed}` : ""}` : "—"}
+                </div>
+
+                {/* counts may not exist until animals exist */}
+                <div className="grid grid-cols-5 gap-4 text-sm">
+                  <div>
+                    <div className="font-semibold">
+                      {herd.counts?.male ?? 0}
                     </div>
+                    <div className="text-stone-500">{maleLabel}</div>
                   </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-      )}
+
+                  <div>
+                    <div className="font-semibold">
+                      {herd.counts?.male_neut ?? 0}
+                    </div>
+                    <div className="text-stone-500">{maleNeutLabel}</div>
+                  </div>
+
+                  <div>
+                    <div className="font-semibold">
+                      {herd.counts?.female ?? 0}
+                    </div>
+                    <div className="text-stone-500">{femaleLabel}</div>
+                  </div>
+
+                  <div>
+                    <div className="font-semibold">
+                      {herd.counts?.female_neut ?? 0}
+                    </div>
+                    <div className="text-stone-500">{femaleNeutLabel}</div>
+                  </div>
+
+                  <div>
+                    <div className="font-semibold">
+                      {herd.counts?.baby ?? 0}
+                    </div>
+                    <div className="text-stone-500">{babyLabel}</div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }

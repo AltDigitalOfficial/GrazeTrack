@@ -21,6 +21,8 @@ type HerdPayload = {
   maleDesc?: string;
   femaleDesc?: string;
   babyDesc?: string;
+  male_neut_desc?: string;
+  female_neut_desc?: string;
   longDescription?: string;
 };
 
@@ -40,6 +42,8 @@ export default function CreateHerdPage() {
   const [maleDesc, setMaleDesc] = useState("");
   const [femaleDesc, setFemaleDesc] = useState("");
   const [babyDesc, setBabyDesc] = useState("");
+  const [maleNeutDesc, setMaleNeutDesc] = useState("");
+  const [femaleNeutDesc, setFemaleNeutDesc] = useState("");
 
   const [longDescription, setLongDescription] = useState("");
 
@@ -47,7 +51,6 @@ export default function CreateHerdPage() {
   const [banner, setBanner] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Load herd for edit
   useEffect(() => {
     let cancelled = false;
 
@@ -64,7 +67,6 @@ export default function CreateHerdPage() {
         setName(data?.name ?? "");
         setShortDescription(data?.shortDescription ?? "");
 
-        // Herd records might contain older strings; keep them if they exist, but normalize UI.
         const loadedSpecies = (data?.species ?? "") as string;
         setSpecies((loadedSpecies as AnimalSpecies) || "");
 
@@ -73,6 +75,8 @@ export default function CreateHerdPage() {
         setMaleDesc(data?.maleDesc ?? "");
         setFemaleDesc(data?.femaleDesc ?? "");
         setBabyDesc(data?.babyDesc ?? "");
+        setMaleNeutDesc(data?.male_neut_desc ?? "");
+        setFemaleNeutDesc(data?.female_neut_desc ?? "");
 
         setLongDescription(data?.longDescription ?? "");
       } catch (e: any) {
@@ -93,8 +97,8 @@ export default function CreateHerdPage() {
     return getBreedsForSpecies(species);
   }, [species]);
 
-  // When species changes, reset breed if it no longer applies
   useEffect(() => {
+    // If the user changes species, reset breed if it no longer applies
     if (!species) {
       if (breed) setBreed("");
       return;
@@ -127,6 +131,8 @@ export default function CreateHerdPage() {
       maleDesc: maleDesc.trim() || undefined,
       femaleDesc: femaleDesc.trim() || undefined,
       babyDesc: babyDesc.trim() || undefined,
+      male_neut_desc: maleNeutDesc.trim() || undefined,
+      female_neut_desc: femaleNeutDesc.trim() || undefined,
       longDescription: longDescription.trim() || undefined,
     };
 
@@ -153,7 +159,6 @@ export default function CreateHerdPage() {
     <div className="max-w-3xl mx-auto py-10 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">{isEdit ? "Edit Herd" : "Create Herd"}</h1>
-
         <Button variant="outline" onClick={() => navigate(ROUTES.herd.list)} disabled={loading}>
           Back
         </Button>
@@ -173,39 +178,44 @@ export default function CreateHerdPage() {
 
       <section className="space-y-4 border p-6 rounded-lg bg-white">
         <div className="space-y-2">
-          <label htmlFor="herdName" className="text-sm font-medium">
-            Herd Name *
+          <label htmlFor="name" className="text-sm font-medium">
+            Herd Name
           </label>
           <Input
-            id="herdName"
+            id="name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={loading}
+            placeholder="e.g. North Pasture Bison"
           />
         </div>
 
         <div className="space-y-2">
           <label htmlFor="shortDescription" className="text-sm font-medium">
-            Quick Description
+            Short Description (optional)
           </label>
           <Input
             id="shortDescription"
             value={shortDescription}
             onChange={(e) => setShortDescription(e.target.value)}
             disabled={loading}
+            placeholder="e.g. Bison herd kept near north fence line"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <label htmlFor="species" className="text-sm font-medium">
-              Species
+              Species (optional)
             </label>
             <select
               id="species"
-              className="w-full h-10 rounded-md border px-3 bg-white"
+              className="w-full border rounded-md px-3 py-2 text-sm"
               value={species}
-              onChange={(e) => setSpecies((e.target.value as AnimalSpecies) || "")}
+              onChange={(e) => {
+                const v = e.target.value as AnimalSpecies;
+                setSpecies(v || "");
+              }}
               disabled={loading}
             >
               <option value="">Select species…</option>
@@ -219,16 +229,16 @@ export default function CreateHerdPage() {
 
           <div className="space-y-2">
             <label htmlFor="breed" className="text-sm font-medium">
-              Breed
+              Breed (optional)
             </label>
             <select
               id="breed"
-              className="w-full h-10 rounded-md border px-3 bg-white"
+              className="w-full border rounded-md px-3 py-2 text-sm"
               value={breed}
               onChange={(e) => setBreed(e.target.value)}
               disabled={loading || !species}
             >
-              <option value="">{species ? "Select breed…" : "Select species first…"}</option>
+              <option value="">Select breed…</option>
               {breedOptions.map((b) => (
                 <option key={b.value} value={b.value}>
                   {b.label}
@@ -238,7 +248,7 @@ export default function CreateHerdPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div className="space-y-2">
             <label htmlFor="maleDesc" className="text-sm font-medium">
               Male label
@@ -251,6 +261,18 @@ export default function CreateHerdPage() {
             />
           </div>
           <div className="space-y-2">
+            <label htmlFor="maleNeutDesc" className="text-sm font-medium">
+              Neutered male label
+            </label>
+            <Input
+              id="maleNeutDesc"
+              value={maleNeutDesc}
+              onChange={(e) => setMaleNeutDesc(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+
+          <div className="space-y-2">
             <label htmlFor="femaleDesc" className="text-sm font-medium">
               Female label
             </label>
@@ -261,6 +283,18 @@ export default function CreateHerdPage() {
               disabled={loading}
             />
           </div>
+          <div className="space-y-2">
+            <label htmlFor="femaleNeutDesc" className="text-sm font-medium">
+              Neutered female label
+            </label>
+            <Input
+              id="femaleNeutDesc"
+              value={femaleNeutDesc}
+              onChange={(e) => setFemaleNeutDesc(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+
           <div className="space-y-2">
             <label htmlFor="babyDesc" className="text-sm font-medium">
               Baby label
@@ -276,15 +310,14 @@ export default function CreateHerdPage() {
 
         <div className="space-y-2">
           <label htmlFor="notes" className="text-sm font-medium">
-            Notes
+            Notes / Long Description (optional)
           </label>
           <textarea
             id="notes"
-            className="w-full min-h-35 rounded-md border p-3 bg-white"
+            className="w-full border rounded-md px-3 py-2 text-sm min-h-[120px]"
             value={longDescription}
             onChange={(e) => setLongDescription(e.target.value)}
             disabled={loading}
-            placeholder="Longer description / notes…"
           />
         </div>
 

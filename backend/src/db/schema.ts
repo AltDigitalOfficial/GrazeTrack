@@ -100,6 +100,10 @@ export const herds = pgTable(
     femaleDesc: text("female_desc"),
     babyDesc: text("baby_desc"),
 
+    // NEW: species-specific labels for neutered animals
+    maleNeutDesc: text("male_neut_desc"),
+    femaleNeutDesc: text("female_neut_desc"),
+
     longDescription: text("long_description"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

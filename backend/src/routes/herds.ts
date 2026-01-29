@@ -25,6 +25,11 @@ const herdCreateSchema = z.object({
   maleDesc: z.string().optional(),
   femaleDesc: z.string().optional(),
   babyDesc: z.string().optional(),
+
+  // NEW (API payload keys)
+  male_neut_desc: z.string().optional(),
+  female_neut_desc: z.string().optional(),
+
   longDescription: z.string().optional(),
 });
 
@@ -48,6 +53,11 @@ export async function herdRoutes(app: FastifyInstance) {
           maleDesc: herds.maleDesc,
           femaleDesc: herds.femaleDesc,
           babyDesc: herds.babyDesc,
+
+          // NEW (response keys)
+          male_neut_desc: herds.maleNeutDesc,
+          female_neut_desc: herds.femaleNeutDesc,
+
           longDescription: herds.longDescription,
           createdAt: herds.createdAt,
         })
@@ -81,6 +91,11 @@ export async function herdRoutes(app: FastifyInstance) {
           maleDesc: herds.maleDesc,
           femaleDesc: herds.femaleDesc,
           babyDesc: herds.babyDesc,
+
+          // NEW (response keys)
+          male_neut_desc: herds.maleNeutDesc,
+          female_neut_desc: herds.femaleNeutDesc,
+
           longDescription: herds.longDescription,
           createdAt: herds.createdAt,
         })
@@ -125,6 +140,11 @@ export async function herdRoutes(app: FastifyInstance) {
         maleDesc: data.maleDesc?.trim() || null,
         femaleDesc: data.femaleDesc?.trim() || null,
         babyDesc: data.babyDesc?.trim() || null,
+
+        // NEW (persist)
+        maleNeutDesc: data.male_neut_desc?.trim() || null,
+        femaleNeutDesc: data.female_neut_desc?.trim() || null,
+
         longDescription: data.longDescription?.trim() || null,
       });
 
@@ -157,13 +177,22 @@ export async function herdRoutes(app: FastifyInstance) {
         .update(herds)
         .set({
           name: data.name != null ? data.name.trim() : undefined,
-          shortDescription: data.shortDescription != null ? data.shortDescription.trim() || null : undefined,
+          shortDescription:
+            data.shortDescription != null ? data.shortDescription.trim() || null : undefined,
           species: data.species != null ? data.species.trim() || null : undefined,
           breed: data.breed != null ? data.breed.trim() || null : undefined,
           maleDesc: data.maleDesc != null ? data.maleDesc.trim() || null : undefined,
           femaleDesc: data.femaleDesc != null ? data.femaleDesc.trim() || null : undefined,
           babyDesc: data.babyDesc != null ? data.babyDesc.trim() || null : undefined,
-          longDescription: data.longDescription != null ? data.longDescription.trim() || null : undefined,
+
+          // NEW (persist)
+          maleNeutDesc:
+            data.male_neut_desc != null ? data.male_neut_desc.trim() || null : undefined,
+          femaleNeutDesc:
+            data.female_neut_desc != null ? data.female_neut_desc.trim() || null : undefined,
+
+          longDescription:
+            data.longDescription != null ? data.longDescription.trim() || null : undefined,
         })
         .where(and(eq(herds.id, herdId), eq(herds.ranchId, ranchId)));
 
