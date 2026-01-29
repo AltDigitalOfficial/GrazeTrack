@@ -21,6 +21,7 @@ export const ROUTES = {
     // Intake (future-safe, explicit)
     animalIntakeRoot: "/herd/animals/intake",
     animalIntakeBirth: "/herd/animals/intake/birth",
+    animalIntakeBirthBatch: "/herd/animals/intake/birth/batch",
     animalIntakePurchase: "/herd/animals/intake/purchase",
     animalIntakeExisting: "/herd/animals/intake/existing",
   },
