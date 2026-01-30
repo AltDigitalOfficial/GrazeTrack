@@ -1,12 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
-import { v4 as uuid } from "uuid";
 import { z } from "zod";
+import { v4 as uuid } from "uuid";
 
 import { db } from "../db";
 import { herds, userRanches } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
 
+/**
+ * Resolve the active ranch for the authenticated user.
+ */
 async function getActiveRanchId(userId: string): Promise<string | null> {
   const rows = await db
     .select({ ranchId: userRanches.ranchId })
@@ -17,16 +20,20 @@ async function getActiveRanchId(userId: string): Promise<string | null> {
   return rows[0]?.ranchId ?? null;
 }
 
+/**
+ * Payload schemas
+ * NOTE: API uses snake_case keys for neutered descriptors.
+ */
 const herdCreateSchema = z.object({
   name: z.string().min(1),
   shortDescription: z.string().optional(),
   species: z.string().optional(),
   breed: z.string().optional(),
+
   maleDesc: z.string().optional(),
   femaleDesc: z.string().optional(),
   babyDesc: z.string().optional(),
 
-  // NEW (API payload keys)
   male_neut_desc: z.string().optional(),
   female_neut_desc: z.string().optional(),
 
@@ -36,11 +43,15 @@ const herdCreateSchema = z.object({
 const herdUpdateSchema = herdCreateSchema.partial();
 
 export async function herdRoutes(app: FastifyInstance) {
-  // LIST
+  /**
+   * LIST herds
+   */
   app.get("/herds", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) {
+        return reply.status(400).send({ error: "No ranch selected" });
+      }
 
       const rows = await db
         .select({
@@ -50,11 +61,11 @@ export async function herdRoutes(app: FastifyInstance) {
           shortDescription: herds.shortDescription,
           species: herds.species,
           breed: herds.breed,
+
           maleDesc: herds.maleDesc,
           femaleDesc: herds.femaleDesc,
           babyDesc: herds.babyDesc,
 
-          // NEW (response keys)
           male_neut_desc: herds.maleNeutDesc,
           female_neut_desc: herds.femaleNeutDesc,
 
@@ -66,17 +77,21 @@ export async function herdRoutes(app: FastifyInstance) {
         .orderBy(herds.createdAt);
 
       return reply.send(rows);
-    } catch (err: any) {
+    } catch (err) {
       req.log.error({ err }, "Failed to list herds");
       return reply.status(500).send({ error: "Failed to list herds" });
     }
   });
 
-  // GET by id
+  /**
+   * GET herd by id
+   */
   app.get("/herds/:id", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) {
+        return reply.status(400).send({ error: "No ranch selected" });
+      }
 
       const herdId = (req.params as any).id as string;
 
@@ -88,11 +103,11 @@ export async function herdRoutes(app: FastifyInstance) {
           shortDescription: herds.shortDescription,
           species: herds.species,
           breed: herds.breed,
+
           maleDesc: herds.maleDesc,
           femaleDesc: herds.femaleDesc,
           babyDesc: herds.babyDesc,
 
-          // NEW (response keys)
           male_neut_desc: herds.maleNeutDesc,
           female_neut_desc: herds.femaleNeutDesc,
 
@@ -104,20 +119,26 @@ export async function herdRoutes(app: FastifyInstance) {
         .limit(1);
 
       const herd = rows[0];
-      if (!herd) return reply.status(404).send({ error: "Herd not found" });
+      if (!herd) {
+        return reply.status(404).send({ error: "Herd not found" });
+      }
 
       return reply.send(herd);
-    } catch (err: any) {
+    } catch (err) {
       req.log.error({ err }, "Failed to get herd");
       return reply.status(500).send({ error: "Failed to get herd" });
     }
   });
 
-  // CREATE
+  /**
+   * CREATE herd
+   */
   app.post("/herds", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) {
+        return reply.status(400).send({ error: "No ranch selected" });
+      }
 
       const parsed = herdCreateSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -137,11 +158,11 @@ export async function herdRoutes(app: FastifyInstance) {
         shortDescription: data.shortDescription?.trim() || null,
         species: data.species?.trim() || null,
         breed: data.breed?.trim() || null,
+
         maleDesc: data.maleDesc?.trim() || null,
         femaleDesc: data.femaleDesc?.trim() || null,
         babyDesc: data.babyDesc?.trim() || null,
 
-        // NEW (persist)
         maleNeutDesc: data.male_neut_desc?.trim() || null,
         femaleNeutDesc: data.female_neut_desc?.trim() || null,
 
@@ -149,17 +170,21 @@ export async function herdRoutes(app: FastifyInstance) {
       });
 
       return reply.status(201).send({ id: herdId });
-    } catch (err: any) {
+    } catch (err) {
       req.log.error({ err }, "Failed to create herd");
       return reply.status(500).send({ error: "Failed to create herd" });
     }
   });
 
-  // UPDATE
+  /**
+   * UPDATE herd
+   */
   app.put("/herds/:id", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) {
+        return reply.status(400).send({ error: "No ranch selected" });
+      }
 
       const herdId = (req.params as any).id as string;
 
@@ -181,11 +206,11 @@ export async function herdRoutes(app: FastifyInstance) {
             data.shortDescription != null ? data.shortDescription.trim() || null : undefined,
           species: data.species != null ? data.species.trim() || null : undefined,
           breed: data.breed != null ? data.breed.trim() || null : undefined,
+
           maleDesc: data.maleDesc != null ? data.maleDesc.trim() || null : undefined,
           femaleDesc: data.femaleDesc != null ? data.femaleDesc.trim() || null : undefined,
           babyDesc: data.babyDesc != null ? data.babyDesc.trim() || null : undefined,
 
-          // NEW (persist)
           maleNeutDesc:
             data.male_neut_desc != null ? data.male_neut_desc.trim() || null : undefined,
           femaleNeutDesc:
@@ -197,24 +222,30 @@ export async function herdRoutes(app: FastifyInstance) {
         .where(and(eq(herds.id, herdId), eq(herds.ranchId, ranchId)));
 
       return reply.send({ success: true });
-    } catch (err: any) {
+    } catch (err) {
       req.log.error({ err }, "Failed to update herd");
       return reply.status(500).send({ error: "Failed to update herd" });
     }
   });
 
-  // DELETE
+  /**
+   * DELETE herd
+   */
   app.delete("/herds/:id", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) {
+        return reply.status(400).send({ error: "No ranch selected" });
+      }
 
       const herdId = (req.params as any).id as string;
 
-      await db.delete(herds).where(and(eq(herds.id, herdId), eq(herds.ranchId, ranchId)));
+      await db
+        .delete(herds)
+        .where(and(eq(herds.id, herdId), eq(herds.ranchId, ranchId)));
 
       return reply.send({ success: true });
-    } catch (err: any) {
+    } catch (err) {
       req.log.error({ err }, "Failed to delete herd");
       return reply.status(500).send({ error: "Failed to delete herd" });
     }

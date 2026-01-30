@@ -229,16 +229,16 @@ export default function CreateHerdPage() {
 
           <div className="space-y-2">
             <label htmlFor="breed" className="text-sm font-medium">
-              Breed (optional)
+              Breed
             </label>
             <select
               id="breed"
-              className="w-full border rounded-md px-3 py-2 text-sm"
+              className="w-full h-10 rounded-md border px-3 bg-white"
               value={breed}
               onChange={(e) => setBreed(e.target.value)}
               disabled={loading || !species}
             >
-              <option value="">Select breed…</option>
+              <option value="">{species ? "Select breed…" : "Select species first…"}</option>
               {breedOptions.map((b) => (
                 <option key={b.value} value={b.value}>
                   {b.label}
@@ -248,10 +248,18 @@ export default function CreateHerdPage() {
           </div>
         </div>
 
+        {/* visual break + section header */}
+        <div className="pt-4 border-t">
+          <div className="text-sm font-semibold">Breed Terms</div>
+          <div className="text-xs text-muted-foreground">
+            Optional labels used throughout the UI (e.g. “Bull / Cow / Calf”, “Sire / Dam / Calf”, etc.).
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div className="space-y-2">
             <label htmlFor="maleDesc" className="text-sm font-medium">
-              Male label
+              Male
             </label>
             <Input
               id="maleDesc"
@@ -260,9 +268,10 @@ export default function CreateHerdPage() {
               disabled={loading}
             />
           </div>
+
           <div className="space-y-2">
             <label htmlFor="maleNeutDesc" className="text-sm font-medium">
-              Neutered male label
+              Neutered male
             </label>
             <Input
               id="maleNeutDesc"
@@ -274,7 +283,7 @@ export default function CreateHerdPage() {
 
           <div className="space-y-2">
             <label htmlFor="femaleDesc" className="text-sm font-medium">
-              Female label
+              Female
             </label>
             <Input
               id="femaleDesc"
@@ -283,9 +292,10 @@ export default function CreateHerdPage() {
               disabled={loading}
             />
           </div>
+
           <div className="space-y-2">
             <label htmlFor="femaleNeutDesc" className="text-sm font-medium">
-              Neutered female label
+              Neutered female
             </label>
             <Input
               id="femaleNeutDesc"
@@ -297,7 +307,7 @@ export default function CreateHerdPage() {
 
           <div className="space-y-2">
             <label htmlFor="babyDesc" className="text-sm font-medium">
-              Baby label
+              Baby
             </label>
             <Input
               id="babyDesc"
@@ -310,14 +320,15 @@ export default function CreateHerdPage() {
 
         <div className="space-y-2">
           <label htmlFor="notes" className="text-sm font-medium">
-            Notes / Long Description (optional)
+            Notes
           </label>
           <textarea
             id="notes"
-            className="w-full border rounded-md px-3 py-2 text-sm min-h-[120px]"
+            className="w-full min-h-35 rounded-md border p-3 bg-white"
             value={longDescription}
             onChange={(e) => setLongDescription(e.target.value)}
             disabled={loading}
+            placeholder="Longer description / notes…"
           />
         </div>
 
