@@ -7,6 +7,9 @@ import { db } from "../db";
 import { herds, userRanches } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
 
+const MIXED_VALUE = "Mixed";
+const OTHER_VALUE = "Other";
+
 /**
  * Resolve the active ranch for the authenticated user.
  */
@@ -22,20 +25,46 @@ async function getActiveRanchId(userId: string): Promise<string | null> {
 
 /**
  * Payload schemas
- * NOTE: API uses snake_case keys for neutered descriptors.
+ *
+ * Herd UI no longer supports herd-level vocabulary fields.
+ *
+ * Species rules (for now):
+ * - allow undefined/null
+ * - allow "Mixed"
+ * - allow any other non-empty string (trimmed)
+ *
+ * TODO (next increment): validate against ranch-defined species for this ranchId
+ * once ranch species tables are imported here (e.g., ranch_species join).
  */
+const speciesSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .or(z.literal(MIXED_VALUE));
+
+/**
+ * Breed rules:
+ * - allow undefined
+ * - allow empty string -> treat as undefined in handlers
+ * - allow "Mixed"
+ * - allow any other non-empty string
+ * - explicitly reject "Other" (UI should persist the free-entry value instead)
+ */
+const breedSchema = z
+  .string()
+  .trim()
+  .refine((v) => v.length > 0, { message: "Breed cannot be empty" })
+  .refine((v) => v !== OTHER_VALUE, {
+    message: 'Breed "Other" is not allowed; send the free-entry breed text instead.',
+  });
+
 const herdCreateSchema = z.object({
   name: z.string().min(1),
   shortDescription: z.string().optional(),
-  species: z.string().optional(),
-  breed: z.string().optional(),
 
-  maleDesc: z.string().optional(),
-  femaleDesc: z.string().optional(),
-  babyDesc: z.string().optional(),
-
-  male_neut_desc: z.string().optional(),
-  female_neut_desc: z.string().optional(),
+  // optional fields
+  species: speciesSchema.optional(),
+  breed: breedSchema.optional(),
 
   longDescription: z.string().optional(),
 });
@@ -61,14 +90,6 @@ export async function herdRoutes(app: FastifyInstance) {
           shortDescription: herds.shortDescription,
           species: herds.species,
           breed: herds.breed,
-
-          maleDesc: herds.maleDesc,
-          femaleDesc: herds.femaleDesc,
-          babyDesc: herds.babyDesc,
-
-          male_neut_desc: herds.maleNeutDesc,
-          female_neut_desc: herds.femaleNeutDesc,
-
           longDescription: herds.longDescription,
           createdAt: herds.createdAt,
         })
@@ -103,14 +124,6 @@ export async function herdRoutes(app: FastifyInstance) {
           shortDescription: herds.shortDescription,
           species: herds.species,
           breed: herds.breed,
-
-          maleDesc: herds.maleDesc,
-          femaleDesc: herds.femaleDesc,
-          babyDesc: herds.babyDesc,
-
-          male_neut_desc: herds.maleNeutDesc,
-          female_neut_desc: herds.femaleNeutDesc,
-
           longDescription: herds.longDescription,
           createdAt: herds.createdAt,
         })
@@ -151,21 +164,16 @@ export async function herdRoutes(app: FastifyInstance) {
       const data = parsed.data;
       const herdId = uuid();
 
+      const species = data.species?.trim();
+      const breed = data.breed?.trim();
+
       await db.insert(herds).values({
         id: herdId,
         ranchId,
         name: data.name.trim(),
         shortDescription: data.shortDescription?.trim() || null,
-        species: data.species?.trim() || null,
-        breed: data.breed?.trim() || null,
-
-        maleDesc: data.maleDesc?.trim() || null,
-        femaleDesc: data.femaleDesc?.trim() || null,
-        babyDesc: data.babyDesc?.trim() || null,
-
-        maleNeutDesc: data.male_neut_desc?.trim() || null,
-        femaleNeutDesc: data.female_neut_desc?.trim() || null,
-
+        species: species ? species : null,
+        breed: breed ? breed : null,
         longDescription: data.longDescription?.trim() || null,
       });
 
@@ -204,17 +212,9 @@ export async function herdRoutes(app: FastifyInstance) {
           name: data.name != null ? data.name.trim() : undefined,
           shortDescription:
             data.shortDescription != null ? data.shortDescription.trim() || null : undefined,
+
           species: data.species != null ? data.species.trim() || null : undefined,
           breed: data.breed != null ? data.breed.trim() || null : undefined,
-
-          maleDesc: data.maleDesc != null ? data.maleDesc.trim() || null : undefined,
-          femaleDesc: data.femaleDesc != null ? data.femaleDesc.trim() || null : undefined,
-          babyDesc: data.babyDesc != null ? data.babyDesc.trim() || null : undefined,
-
-          maleNeutDesc:
-            data.male_neut_desc != null ? data.male_neut_desc.trim() || null : undefined,
-          femaleNeutDesc:
-            data.female_neut_desc != null ? data.female_neut_desc.trim() || null : undefined,
 
           longDescription:
             data.longDescription != null ? data.longDescription.trim() || null : undefined,
@@ -240,9 +240,7 @@ export async function herdRoutes(app: FastifyInstance) {
 
       const herdId = (req.params as any).id as string;
 
-      await db
-        .delete(herds)
-        .where(and(eq(herds.id, herdId), eq(herds.ranchId, ranchId)));
+      await db.delete(herds).where(and(eq(herds.id, herdId), eq(herds.ranchId, ranchId)));
 
       return reply.send({ success: true });
     } catch (err) {

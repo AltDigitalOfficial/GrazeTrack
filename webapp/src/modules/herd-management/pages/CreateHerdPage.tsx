@@ -7,24 +7,27 @@ import { Button } from "@/components/ui/button";
 import { apiGet, apiPostJson, apiPutJson } from "@/lib/api";
 import { ROUTES } from "@/routes";
 
-import {
-  ANIMAL_SPECIES,
-  getBreedsForSpecies,
-  type AnimalSpecies,
-} from "@/components/lookups/animalLookups";
+import { getBreedsForSpecies, type AnimalSpecies } from "@/components/lookups/animalLookups";
 
 type HerdPayload = {
   name: string;
   shortDescription?: string;
   species?: string;
   breed?: string;
-  maleDesc?: string;
-  femaleDesc?: string;
-  babyDesc?: string;
-  male_neut_desc?: string;
-  female_neut_desc?: string;
   longDescription?: string;
 };
+
+// Minimal shape needed for Herd Create
+type RanchSettingsDTO = {
+  species?: Array<{
+    species: string;
+  }>;
+};
+
+type SpeciesOption = { value: string; label: string };
+
+const MIXED_VALUE = "Mixed";
+const OTHER_VALUE = "Other"; // Breed only
 
 export default function CreateHerdPage() {
   const navigate = useNavigate();
@@ -36,25 +39,88 @@ export default function CreateHerdPage() {
   const [name, setName] = useState("");
   const [shortDescription, setShortDescription] = useState("");
 
-  const [species, setSpecies] = useState<AnimalSpecies | "">("");
-  const [breed, setBreed] = useState<string>("");
+  const [speciesOptions, setSpeciesOptions] = useState<SpeciesOption[]>([]);
+  const [species, setSpecies] = useState<string>("");
 
-  const [maleDesc, setMaleDesc] = useState("");
-  const [femaleDesc, setFemaleDesc] = useState("");
-  const [babyDesc, setBabyDesc] = useState("");
-  const [maleNeutDesc, setMaleNeutDesc] = useState("");
-  const [femaleNeutDesc, setFemaleNeutDesc] = useState("");
+  // Breed UI:
+  // - breedMode is what the select holds: "" | "Mixed" | "Other" | standard-breed-value
+  // - otherBreedText is only used when breedMode === "Other"
+  const [breedMode, setBreedMode] = useState<string>("");
+  const [otherBreedText, setOtherBreedText] = useState<string>("");
 
   const [longDescription, setLongDescription] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [loadingRanchSettings, setLoadingRanchSettings] = useState(false);
+
   const [banner, setBanner] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [ranchHasNoSpecies, setRanchHasNoSpecies] = useState(false);
+
+  const isMixedSpecies = species === MIXED_VALUE;
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
+    async function loadRanchSettingsSpecies() {
+      setLoadingRanchSettings(true);
+      try {
+        const rs = await apiGet<RanchSettingsDTO>(`/ranch-settings`);
+        if (cancelled) return;
+
+        const raw = (rs?.species || [])
+          .map((s) => (s?.species ?? "").trim())
+          .filter((v) => v.length > 0);
+
+        // unique + stable order
+        const seen = new Set<string>();
+        const unique = raw.filter((v) => {
+          const key = v.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        if (unique.length === 0) {
+          setSpeciesOptions([]);
+          setRanchHasNoSpecies(true);
+
+          // Don't force-clear on edit, but for create this avoids weird state.
+          if (!isEdit) setSpecies("");
+          return;
+        }
+
+        setRanchHasNoSpecies(false);
+
+        // Build dropdown: ranch species first, then Mixed at bottom.
+        // Label: keep simple & aligned to stored value; Ranch Settings already defines the vocabulary.
+        const opts: SpeciesOption[] = unique.map((v) => ({ value: v, label: v }));
+        opts.push({ value: MIXED_VALUE, label: "Mixed" });
+
+        setSpeciesOptions(opts);
+      } catch (e: any) {
+        if (cancelled) return;
+
+        // If we can't load ranch settings, block create rather than guessing.
+        setSpeciesOptions([]);
+        setRanchHasNoSpecies(true);
+        setErrorMsg(e?.message || "Failed to load ranch settings (species)");
+      } finally {
+        if (!cancelled) setLoadingRanchSettings(false);
+      }
+    }
+
+    loadRanchSettingsSpecies();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdit]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHerd() {
       if (!isEdit || !herdId) return;
 
       setLoading(true);
@@ -66,19 +132,21 @@ export default function CreateHerdPage() {
 
         setName(data?.name ?? "");
         setShortDescription(data?.shortDescription ?? "");
-
-        const loadedSpecies = (data?.species ?? "") as string;
-        setSpecies((loadedSpecies as AnimalSpecies) || "");
-
-        setBreed(data?.breed ?? "");
-
-        setMaleDesc(data?.maleDesc ?? "");
-        setFemaleDesc(data?.femaleDesc ?? "");
-        setBabyDesc(data?.babyDesc ?? "");
-        setMaleNeutDesc(data?.male_neut_desc ?? "");
-        setFemaleNeutDesc(data?.female_neut_desc ?? "");
-
+        setSpecies(data?.species ?? "");
         setLongDescription(data?.longDescription ?? "");
+
+        const loadedBreed = (data?.breed ?? "") as string;
+
+        if (!loadedBreed) {
+          setBreedMode("");
+          setOtherBreedText("");
+        } else if (loadedBreed === MIXED_VALUE) {
+          setBreedMode(MIXED_VALUE);
+          setOtherBreedText("");
+        } else {
+          setBreedMode(loadedBreed);
+          setOtherBreedText("");
+        }
       } catch (e: any) {
         if (!cancelled) setErrorMsg(e?.message || "Failed to load herd");
       } finally {
@@ -86,32 +154,95 @@ export default function CreateHerdPage() {
       }
     }
 
-    load();
+    loadHerd();
     return () => {
       cancelled = true;
     };
   }, [isEdit, herdId]);
 
-  const breedOptions = useMemo(() => {
+  const standardBreedOptions = useMemo(() => {
     if (!species) return [];
-    return getBreedsForSpecies(species);
-  }, [species]);
+    if (isMixedSpecies) return [];
+    // species values are ranch-defined strings; your lookup expects AnimalSpecies.
+    // If species isn't a recognized lookup key, this will return [] and that's OK.
+    return getBreedsForSpecies(species as AnimalSpecies);
+  }, [species, isMixedSpecies]);
+
+  const cleanedStandardBreedOptions = useMemo(() => {
+    // Remove any existing "Mixed"/"Other"/"Mixed/Crossbred" from lookup list so we only show our special options once.
+    return standardBreedOptions.filter((b) => {
+      const v = (b.value ?? "").toLowerCase();
+      const l = (b.label ?? "").toLowerCase();
+
+      if (v === "other") return false;
+      if (l === "other") return false;
+
+      if (v === "mixed") return false;
+      if (l === "mixed") return false;
+
+      if (l.includes("mixed/crossbred")) return false;
+      if (l.includes("mixed crossbred")) return false;
+
+      return true;
+    });
+  }, [standardBreedOptions]);
 
   useEffect(() => {
-    // If the user changes species, reset breed if it no longer applies
+    // If species changes, keep dependent fields explicit.
     if (!species) {
-      if (breed) setBreed("");
+      if (breedMode) setBreedMode("");
+      if (otherBreedText) setOtherBreedText("");
       return;
     }
-    if (!breed) return;
 
-    const valid = breedOptions.some((b) => b.value === breed);
-    if (!valid) setBreed("");
-  }, [species, breed, breedOptions]);
+    // If species changes to Mixed, clear breed state and disable the control.
+    if (isMixedSpecies) {
+      if (breedMode) setBreedMode("");
+      if (otherBreedText) setOtherBreedText("");
+      return;
+    }
+
+    // If switching away from Other, clear the freeform value.
+    if (breedMode !== OTHER_VALUE && otherBreedText) {
+      setOtherBreedText("");
+    }
+
+    // If breedMode is a standard value, verify it is valid for this species (when we have options).
+    if (!breedMode) return;
+    if (breedMode === MIXED_VALUE) return;
+    if (breedMode === OTHER_VALUE) return;
+
+    if (cleanedStandardBreedOptions.length === 0) return;
+
+    const valid = cleanedStandardBreedOptions.some((b) => b.value === breedMode);
+    if (!valid) setBreedMode("");
+  }, [species, isMixedSpecies, breedMode, otherBreedText, cleanedStandardBreedOptions]);
+
+  const resolvedBreedForPayload = useMemo(() => {
+    if (isMixedSpecies) return undefined;
+    if (!breedMode) return undefined;
+
+    if (breedMode === MIXED_VALUE) return MIXED_VALUE;
+
+    if (breedMode === OTHER_VALUE) {
+      const v = otherBreedText.trim();
+      return v.length > 0 ? v : undefined;
+    }
+
+    return breedMode;
+  }, [isMixedSpecies, breedMode, otherBreedText]);
 
   const canSubmit = useMemo(() => {
-    return name.trim().length > 0 && !loading;
-  }, [name, loading]);
+    if (loading) return false;
+    if (loadingRanchSettings) return false;
+    if (name.trim().length === 0) return false;
+
+    // Block creating a herd if ranch has no species configured.
+    // For edit: allow save even if settings are empty (don’t brick legacy edits).
+    if (!isEdit && ranchHasNoSpecies) return false;
+
+    return true;
+  }, [name, loading, loadingRanchSettings, ranchHasNoSpecies, isEdit]);
 
   const handleSave = async () => {
     if (!canSubmit) return;
@@ -123,16 +254,8 @@ export default function CreateHerdPage() {
     const payload: HerdPayload = {
       name: name.trim(),
       shortDescription: shortDescription.trim() || undefined,
-
-      // Store stable identifiers from the lookup table (e.g. "bison", "buelingo")
       species: species || undefined,
-      breed: breed || undefined,
-
-      maleDesc: maleDesc.trim() || undefined,
-      femaleDesc: femaleDesc.trim() || undefined,
-      babyDesc: babyDesc.trim() || undefined,
-      male_neut_desc: maleNeutDesc.trim() || undefined,
-      female_neut_desc: femaleNeutDesc.trim() || undefined,
+      breed: resolvedBreedForPayload,
       longDescription: longDescription.trim() || undefined,
     };
 
@@ -176,6 +299,25 @@ export default function CreateHerdPage() {
         </div>
       )}
 
+      {!isEdit && ranchHasNoSpecies && !loadingRanchSettings && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm space-y-2">
+          <div className="font-medium">You can’t create herds yet.</div>
+          <div>
+            Before creating herds, add at least one species in Ranch Settings so we know what animals you
+            raise on this ranch.
+          </div>
+          <div>
+            <Button
+              variant="outline"
+              onClick={() => navigate(ROUTES.admin.ranch)}
+              disabled={loading}
+            >
+              Go to Ranch Settings
+            </Button>
+          </div>
+        </div>
+      )}
+
       <section className="space-y-4 border p-6 rounded-lg bg-white">
         <div className="space-y-2">
           <label htmlFor="name" className="text-sm font-medium">
@@ -185,7 +327,7 @@ export default function CreateHerdPage() {
             id="name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            disabled={loading}
+            disabled={loading || (!isEdit && ranchHasNoSpecies)}
             placeholder="e.g. North Pasture Bison"
           />
         </div>
@@ -198,33 +340,36 @@ export default function CreateHerdPage() {
             id="shortDescription"
             value={shortDescription}
             onChange={(e) => setShortDescription(e.target.value)}
-            disabled={loading}
-            placeholder="e.g. Bison herd kept near north fence line"
+            disabled={loading || (!isEdit && ranchHasNoSpecies)}
+            placeholder="e.g. Herd kept near north fence line"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <label htmlFor="species" className="text-sm font-medium">
-              Species (optional)
+              Species
             </label>
             <select
               id="species"
-              className="w-full border rounded-md px-3 py-2 text-sm"
+              className="w-full border rounded-md px-3 py-2 text-sm bg-white h-10"
               value={species}
-              onChange={(e) => {
-                const v = e.target.value as AnimalSpecies;
-                setSpecies(v || "");
-              }}
-              disabled={loading}
+              onChange={(e) => setSpecies(e.target.value)}
+              disabled={loading || loadingRanchSettings || (!isEdit && ranchHasNoSpecies)}
             >
-              <option value="">Select species…</option>
-              {ANIMAL_SPECIES.map((s) => (
+              <option value="">
+                {loadingRanchSettings ? "Loading species…" : "Select species…"}
+              </option>
+              {speciesOptions.map((s) => (
                 <option key={s.value} value={s.value}>
                   {s.label}
                 </option>
               ))}
             </select>
+
+            <div className="text-xs text-muted-foreground">
+              Need another species? Add it in Ranch Settings.
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -233,88 +378,53 @@ export default function CreateHerdPage() {
             </label>
             <select
               id="breed"
-              className="w-full h-10 rounded-md border px-3 bg-white"
-              value={breed}
-              onChange={(e) => setBreed(e.target.value)}
-              disabled={loading || !species}
+              className="w-full h-10 rounded-md border px-3 bg-white text-sm"
+              value={breedMode}
+              onChange={(e) => setBreedMode(e.target.value)}
+              disabled={
+                loading ||
+                loadingRanchSettings ||
+                (!species || isMixedSpecies) ||
+                (!isEdit && ranchHasNoSpecies)
+              }
             >
-              <option value="">{species ? "Select breed…" : "Select species first…"}</option>
-              {breedOptions.map((b) => (
-                <option key={b.value} value={b.value}>
-                  {b.label}
-                </option>
-              ))}
+              <option value="">
+                {isMixedSpecies
+                  ? "Breed disabled for Mixed herds"
+                  : species
+                  ? "Select breed…"
+                  : "Select species first…"}
+              </option>
+
+              {!isMixedSpecies && (
+                <>
+                  <option value={MIXED_VALUE}>Mixed</option>
+                  <option value={OTHER_VALUE}>Other</option>
+                </>
+              )}
+
+              {!isMixedSpecies &&
+                cleanedStandardBreedOptions.map((b) => (
+                  <option key={b.value} value={b.value}>
+                    {b.label}
+                  </option>
+                ))}
             </select>
-          </div>
-        </div>
 
-        {/* visual break + section header */}
-        <div className="pt-4 border-t">
-          <div className="text-sm font-semibold">Breed Terms</div>
-          <div className="text-xs text-muted-foreground">
-            Optional labels used throughout the UI (e.g. “Bull / Cow / Calf”, “Sire / Dam / Calf”, etc.).
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div className="space-y-2">
-            <label htmlFor="maleDesc" className="text-sm font-medium">
-              Male
-            </label>
-            <Input
-              id="maleDesc"
-              value={maleDesc}
-              onChange={(e) => setMaleDesc(e.target.value)}
-              disabled={loading}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="maleNeutDesc" className="text-sm font-medium">
-              Neutered male
-            </label>
-            <Input
-              id="maleNeutDesc"
-              value={maleNeutDesc}
-              onChange={(e) => setMaleNeutDesc(e.target.value)}
-              disabled={loading}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="femaleDesc" className="text-sm font-medium">
-              Female
-            </label>
-            <Input
-              id="femaleDesc"
-              value={femaleDesc}
-              onChange={(e) => setFemaleDesc(e.target.value)}
-              disabled={loading}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="femaleNeutDesc" className="text-sm font-medium">
-              Neutered female
-            </label>
-            <Input
-              id="femaleNeutDesc"
-              value={femaleNeutDesc}
-              onChange={(e) => setFemaleNeutDesc(e.target.value)}
-              disabled={loading}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="babyDesc" className="text-sm font-medium">
-              Baby
-            </label>
-            <Input
-              id="babyDesc"
-              value={babyDesc}
-              onChange={(e) => setBabyDesc(e.target.value)}
-              disabled={loading}
-            />
+            {breedMode === OTHER_VALUE && !isMixedSpecies && (
+              <div className="space-y-2 pt-2">
+                <label htmlFor="otherBreed" className="text-sm font-medium">
+                  Breed (Other)
+                </label>
+                <Input
+                  id="otherBreed"
+                  value={otherBreedText}
+                  onChange={(e) => setOtherBreedText(e.target.value)}
+                  disabled={loading || (!isEdit && ranchHasNoSpecies)}
+                  placeholder="Enter breed…"
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -327,7 +437,7 @@ export default function CreateHerdPage() {
             className="w-full min-h-35 rounded-md border p-3 bg-white"
             value={longDescription}
             onChange={(e) => setLongDescription(e.target.value)}
-            disabled={loading}
+            disabled={loading || (!isEdit && ranchHasNoSpecies)}
             placeholder="Longer description / notes…"
           />
         </div>
