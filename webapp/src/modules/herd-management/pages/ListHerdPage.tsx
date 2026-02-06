@@ -4,6 +4,16 @@ import { MoreHorizontal } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ROUTES } from "@/routes";
 import { apiDelete, apiGet } from "@/lib/api";
 
@@ -72,6 +82,20 @@ export default function ListHerdPage() {
   const [loadingRanchSettings, setLoadingRanchSettings] = useState(true);
   const [ranchTermsBySpecies, setRanchTermsBySpecies] = useState<Record<string, SpeciesTerms>>({});
 
+  // Delete dialog state
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [herdToDelete, setHerdToDelete] = useState<HerdListItem | null>(null);
+
+  const genericLabels = useMemo(() => {
+    return {
+      male: "Males",
+      male_neut: "Neutered males",
+      female: "Females",
+      female_neut: "Neutered females",
+      baby: "Babies",
+    };
+  }, []);
+
   const loadHerds = async () => {
     const data = await apiGet<HerdListItem[]>("/herds");
     setHerds(Array.isArray(data) ? data : []);
@@ -125,40 +149,76 @@ export default function ListHerdPage() {
     void loadAll();
   }, []);
 
-  const genericLabels = useMemo(() => {
-    return {
-      male: "Males",
-      male_neut: "Neutered males",
-      female: "Females",
-      female_neut: "Neutered females",
-      baby: "Babies",
-    };
-  }, []);
+  const openDeleteDialog = (herd: HerdListItem) => {
+    setHerdToDelete(herd);
+    setDeleteOpen(true);
+  };
 
-  const handleDelete = async (herd: HerdListItem) => {
-    const empty = isEmptyCounts(herd.counts);
-    if (!empty) return;
+  const closeDeleteDialog = () => {
+    setDeleteOpen(false);
+    setHerdToDelete(null);
+  };
 
-    const ok = window.confirm(
-      `Delete herd "${herd.name}"?\n\nThis can’t be undone.`
-    );
-    if (!ok) return;
+  const confirmDelete = async () => {
+    if (!herdToDelete) return;
+
+    const empty = isEmptyCounts(herdToDelete.counts);
+    if (!empty) {
+      // Safety: should never happen if the UI is gating correctly.
+      closeDeleteDialog();
+      return;
+    }
 
     setLoading(true);
     setErrorMsg(null);
 
     try {
-      await apiDelete<{ success: true }>(`/herds/${herd.id}`);
+      await apiDelete<{ success: true }>(`/herds/${herdToDelete.id}`);
+      closeDeleteDialog();
       await loadAll();
     } catch (err: any) {
       setErrorMsg(err?.message || "Failed to delete herd");
+      closeDeleteDialog();
     } finally {
       setLoading(false);
     }
   };
 
+  const showEmptyState = !loading && !errorMsg && herds.length === 0;
+
   return (
     <div className="space-y-6">
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deleteOpen} onOpenChange={(open) => (open ? setDeleteOpen(true) : closeDeleteDialog())}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete herd?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {herdToDelete ? (
+                <>
+                  This will permanently delete <span className="font-medium">“{herdToDelete.name}”</span>.
+                  This can’t be undone.
+                </>
+              ) : (
+                <>This action can’t be undone.</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={loading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDelete();
+              }}
+              disabled={loading}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Herds</h1>
@@ -178,144 +238,159 @@ export default function ListHerdPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-        {herds.map((herd) => {
-          const isTransfer =
-            herd.isSystem === true || herd.name.trim().toLowerCase() === "transfer";
+      {showEmptyState ? (
+        <Card className="rounded-xl border bg-white p-6">
+          <div className="space-y-2">
+            <div className="text-lg font-semibold">No herds yet</div>
+            <div className="text-sm text-stone-600">
+              Create your first herd to start grouping animals by workflow, pasture, or management style.
+            </div>
+          </div>
 
-          const speciesValue = (herd.species ?? "").trim();
-          const isMixedSpecies = speciesValue === MIXED_VALUE || speciesValue.length === 0;
+          <div className="pt-4">
+            <Button onClick={() => navigate(ROUTES.herd.create)}>Create your first herd</Button>
+          </div>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          {herds.map((herd) => {
+            const isTransfer =
+              herd.isSystem === true || herd.name.trim().toLowerCase() === "transfer";
 
-          const terms = !isMixedSpecies ? ranchTermsBySpecies[speciesValue] : undefined;
+            const speciesValue = (herd.species ?? "").trim();
+            const isMixedSpecies = speciesValue === MIXED_VALUE || speciesValue.length === 0;
 
-          const maleLabel = terms?.male_desc || genericLabels.male;
-          const maleNeutLabel = terms?.male_neut_desc || genericLabels.male_neut;
-          const femaleLabel = terms?.female_desc || genericLabels.female;
-          const femaleNeutLabel = terms?.female_neut_desc || genericLabels.female_neut;
-          const babyLabel = terms?.baby_desc || genericLabels.baby;
+            const terms = !isMixedSpecies ? ranchTermsBySpecies[speciesValue] : undefined;
 
-          const canDelete = !isTransfer && isEmptyCounts(herd.counts);
+            const maleLabel = terms?.male_desc || genericLabels.male;
+            const maleNeutLabel = terms?.male_neut_desc || genericLabels.male_neut;
+            const femaleLabel = terms?.female_desc || genericLabels.female;
+            const femaleNeutLabel = terms?.female_neut_desc || genericLabels.female_neut;
+            const babyLabel = terms?.baby_desc || genericLabels.baby;
 
-          return (
-            <Card key={herd.id} className="rounded-xl border bg-white p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <h2 className="text-lg font-semibold">{herd.name}</h2>
-                  {herd.shortDescription ? (
-                    <p className="text-sm text-stone-600">{herd.shortDescription}</p>
-                  ) : null}
-                </div>
+            const canDelete = !isTransfer && isEmptyCounts(herd.counts);
 
-                <DropdownMenu.Root>
-                  <DropdownMenu.Trigger asChild>
-                    <button
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white hover:bg-stone-50"
-                      aria-label="Open herd menu"
-                      disabled={loading}
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
-                  </DropdownMenu.Trigger>
+            return (
+              <Card key={herd.id} className="rounded-xl border bg-white p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-semibold">{herd.name}</h2>
+                    {herd.shortDescription ? (
+                      <p className="text-sm text-stone-600">{herd.shortDescription}</p>
+                    ) : null}
+                  </div>
 
-                  <DropdownMenu.Content
-                    align="end"
-                    className="z-50 min-w-45 rounded-md border bg-white p-1 shadow-md"
-                  >
-                    <DropdownMenu.Item
-                      className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
-                      onSelect={() => navigate(ROUTES.herd.edit, { state: { herdId: herd.id } })}
-                    >
-                      Edit herd
-                    </DropdownMenu.Item>
-
-                    <DropdownMenu.Item
-                      className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
-                      onSelect={() =>
-                        navigate(ROUTES.herd.animals, { state: { herdId: herd.id } })
-                      }
-                    >
-                      View animals
-                    </DropdownMenu.Item>
-
-                    {isTransfer ? (
-                      <DropdownMenu.Item
-                        className="cursor-not-allowed rounded px-2 py-1.5 text-sm text-stone-400 outline-none"
-                        disabled
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild>
+                      <button
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white hover:bg-stone-50"
+                        aria-label="Open herd menu"
+                        disabled={loading}
                       >
-                        Transfer herd (system)
-                      </DropdownMenu.Item>
-                    ) : (
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </DropdownMenu.Trigger>
+
+                    <DropdownMenu.Content
+                      align="end"
+                      className="z-50 min-w-45 rounded-md border bg-white p-1 shadow-md"
+                    >
                       <DropdownMenu.Item
                         className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
-                        onSelect={() => {
-                          // placeholder: transfer action can be wired later
-                        }}
+                        onSelect={() => navigate(ROUTES.herd.edit, { state: { herdId: herd.id } })}
                       >
-                        Transfer herd
+                        Edit herd
                       </DropdownMenu.Item>
-                    )}
 
-                    <DropdownMenu.Separator className="my-1 h-px bg-stone-200" />
-
-                    {canDelete ? (
                       <DropdownMenu.Item
-                        className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none text-red-700 hover:bg-red-50"
-                        onSelect={() => void handleDelete(herd)}
+                        className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
+                        onSelect={() =>
+                          navigate(ROUTES.herd.animals, { state: { herdId: herd.id } })
+                        }
                       >
-                        Delete herd
+                        View animals
                       </DropdownMenu.Item>
-                    ) : (
-                      <DropdownMenu.Item
-                        className="cursor-not-allowed rounded px-2 py-1.5 text-sm text-stone-400 outline-none"
-                        disabled
-                      >
-                        Delete herd (empty only)
-                      </DropdownMenu.Item>
-                    )}
-                  </DropdownMenu.Content>
-                </DropdownMenu.Root>
-              </div>
 
-              <div className="mt-4 space-y-3">
-                <div className="text-sm text-stone-500">
-                  {herd.species ? `${herd.species}${herd.breed ? ` • ${herd.breed}` : ""}` : "—"}
+                      {isTransfer ? (
+                        <DropdownMenu.Item
+                          className="cursor-not-allowed rounded px-2 py-1.5 text-sm text-stone-400 outline-none"
+                          disabled
+                        >
+                          Transfer herd (system)
+                        </DropdownMenu.Item>
+                      ) : (
+                        <DropdownMenu.Item
+                          className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
+                          onSelect={() => {
+                            // placeholder: transfer action can be wired later
+                          }}
+                        >
+                          Transfer herd
+                        </DropdownMenu.Item>
+                      )}
+
+                      <DropdownMenu.Separator className="my-1 h-px bg-stone-200" />
+
+                      {canDelete ? (
+                        <DropdownMenu.Item
+                          className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none text-red-700 hover:bg-red-50"
+                          onSelect={() => openDeleteDialog(herd)}
+                        >
+                          Delete herd
+                        </DropdownMenu.Item>
+                      ) : (
+                        <DropdownMenu.Item
+                          className="cursor-not-allowed rounded px-2 py-1.5 text-sm text-stone-400 outline-none"
+                          disabled
+                        >
+                          Delete herd (empty only)
+                        </DropdownMenu.Item>
+                      )}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Root>
                 </div>
 
-                <div className="grid grid-cols-5 gap-4 text-sm">
-                  <div>
-                    <div className="font-semibold">{herd.counts?.male ?? 0}</div>
-                    <div className="text-stone-500">{maleLabel}</div>
+                <div className="mt-4 space-y-3">
+                  <div className="text-sm text-stone-500">
+                    {herd.species ? `${herd.species}${herd.breed ? ` • ${herd.breed}` : ""}` : "—"}
                   </div>
 
-                  <div>
-                    <div className="font-semibold">{herd.counts?.male_neut ?? 0}</div>
-                    <div className="text-stone-500">{maleNeutLabel}</div>
+                  <div className="grid grid-cols-5 gap-4 text-sm">
+                    <div>
+                      <div className="font-semibold">{herd.counts?.male ?? 0}</div>
+                      <div className="text-stone-500">{maleLabel}</div>
+                    </div>
+
+                    <div>
+                      <div className="font-semibold">{herd.counts?.male_neut ?? 0}</div>
+                      <div className="text-stone-500">{maleNeutLabel}</div>
+                    </div>
+
+                    <div>
+                      <div className="font-semibold">{herd.counts?.female ?? 0}</div>
+                      <div className="text-stone-500">{femaleLabel}</div>
+                    </div>
+
+                    <div>
+                      <div className="font-semibold">{herd.counts?.female_neut ?? 0}</div>
+                      <div className="text-stone-500">{femaleNeutLabel}</div>
+                    </div>
+
+                    <div>
+                      <div className="font-semibold">{herd.counts?.baby ?? 0}</div>
+                      <div className="text-stone-500">{babyLabel}</div>
+                    </div>
                   </div>
 
-                  <div>
-                    <div className="font-semibold">{herd.counts?.female ?? 0}</div>
-                    <div className="text-stone-500">{femaleLabel}</div>
-                  </div>
-
-                  <div>
-                    <div className="font-semibold">{herd.counts?.female_neut ?? 0}</div>
-                    <div className="text-stone-500">{femaleNeutLabel}</div>
-                  </div>
-
-                  <div>
-                    <div className="font-semibold">{herd.counts?.baby ?? 0}</div>
-                    <div className="text-stone-500">{babyLabel}</div>
-                  </div>
+                  {loadingRanchSettings && !isMixedSpecies ? (
+                    <div className="text-xs text-muted-foreground">Loading ranch vocabulary…</div>
+                  ) : null}
                 </div>
-
-                {loadingRanchSettings && !isMixedSpecies ? (
-                  <div className="text-xs text-muted-foreground">Loading ranch vocabulary…</div>
-                ) : null}
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

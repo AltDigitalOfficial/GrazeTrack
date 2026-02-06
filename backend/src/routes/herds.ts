@@ -1,14 +1,19 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { v4 as uuid } from "uuid";
 
 import { db } from "../db";
-import { herds, userRanches } from "../db/schema";
+import { animalHerdMembership, herds, userRanches } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
 
 const MIXED_VALUE = "Mixed";
 const OTHER_VALUE = "Other";
+
+// Treat this herd name as system-protected (until we add an explicit DB flag)
+const TRANSFER_HERD_NAME = "transfer";
+
+const herdIdParamSchema = z.string().uuid();
 
 /**
  * Resolve the active ranch for the authenticated user.
@@ -23,27 +28,34 @@ async function getActiveRanchId(userId: string): Promise<string | null> {
   return rows[0]?.ranchId ?? null;
 }
 
+function parseHerdIdOrReply(params: unknown, reply: any): string | null {
+  const raw = (params as any)?.id;
+  const parsed = herdIdParamSchema.safeParse(raw);
+  if (!parsed.success) {
+    reply.status(400).send({ error: "Invalid herd id (expected UUID)" });
+    return null;
+  }
+  return parsed.data;
+}
+
 /**
  * Payload schemas
  *
  * Herd UI no longer supports herd-level vocabulary fields.
  *
- * Species rules (for now):
+ * Species rules:
  * - allow undefined/null
  * - allow "Mixed"
  * - allow any other non-empty string (trimmed)
  *
- * TODO (next increment): validate against ranch-defined species for this ranchId
- * once ranch species tables are imported here (e.g., ranch_species join).
+ * TODO: validate against ranch-defined species for this ranchId once we enforce that server-side.
  */
 const speciesSchema = z.string().trim().min(1).or(z.literal(MIXED_VALUE));
 
 /**
  * Breed rules:
  * - allow undefined
- * - allow empty string -> treat as undefined in handlers
- * - allow "Mixed"
- * - allow any other non-empty string
+ * - allow any non-empty string
  * - explicitly reject "Other" (UI should persist the free-entry value instead)
  */
 const breedSchema = z
@@ -66,10 +78,6 @@ const herdCreateSchema = z.object({
 });
 
 const herdUpdateSchema = herdCreateSchema.partial();
-
-const herdBreedsQuerySchema = z.object({
-  species: z.string().trim().min(1),
-});
 
 export async function herdRoutes(app: FastifyInstance) {
   /**
@@ -105,65 +113,6 @@ export async function herdRoutes(app: FastifyInstance) {
   });
 
   /**
-   * LIST distinct breeds for a ranch + species (most recent first)
-   *
-   * IMPORTANT: this route MUST be declared before /herds/:id
-   * or "breeds" will be treated as an id param.
-   */
-  app.get("/herds/breeds", { preHandler: requireAuth }, async (req, reply) => {
-    try {
-      const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) {
-        return reply.status(400).send({ error: "No ranch selected" });
-      }
-
-      const parsed = herdBreedsQuerySchema.safeParse(req.query ?? {});
-      if (!parsed.success) {
-        return reply.status(400).send({
-          error: "Invalid query",
-          details: parsed.error.flatten(),
-        });
-      }
-
-      const species = parsed.data.species.trim();
-
-      const rows = await db
-        .select({
-          breed: herds.breed,
-          createdAt: herds.createdAt,
-        })
-        .from(herds)
-        .where(and(eq(herds.ranchId, ranchId), eq(herds.species, species)))
-        .orderBy(herds.createdAt)
-        .limit(500);
-
-      // rows oldest -> newest, walk backwards for "most recent first"
-      const seen = new Set<string>();
-      const breeds: string[] = [];
-
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const b = (rows[i]?.breed ?? "").trim();
-        if (!b) continue;
-
-        if (b === MIXED_VALUE) continue;
-
-        const key = b.toLowerCase();
-        if (seen.has(key)) continue;
-
-        seen.add(key);
-        breeds.push(b);
-
-        if (breeds.length >= 50) break;
-      }
-
-      return reply.send({ breeds });
-    } catch (err) {
-      req.log.error({ err }, "Failed to list herd breeds");
-      return reply.status(500).send({ error: "Failed to list herd breeds" });
-    }
-  });
-
-  /**
    * GET herd by id
    */
   app.get("/herds/:id", { preHandler: requireAuth }, async (req, reply) => {
@@ -173,7 +122,8 @@ export async function herdRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "No ranch selected" });
       }
 
-      const herdId = (req.params as any).id as string;
+      const herdId = parseHerdIdOrReply(req.params, reply);
+      if (!herdId) return;
 
       const rows = await db
         .select({
@@ -253,7 +203,8 @@ export async function herdRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "No ranch selected" });
       }
 
-      const herdId = (req.params as any).id as string;
+      const herdId = parseHerdIdOrReply(req.params, reply);
+      if (!herdId) return;
 
       const parsed = herdUpdateSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -289,6 +240,12 @@ export async function herdRoutes(app: FastifyInstance) {
 
   /**
    * DELETE herd
+   *
+   * Hardening rules:
+   * - must exist in this ranchId (tenant scope)
+   * - "transfer" herd is protected
+   * - herd must be empty (no current animal_herd_membership rows where end_at is null)
+   * - atomic delete: we only delete if NOT EXISTS(...) is true at delete-time
    */
   app.delete("/herds/:id", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -297,9 +254,51 @@ export async function herdRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "No ranch selected" });
       }
 
-      const herdId = (req.params as any).id as string;
+      const herdId = parseHerdIdOrReply(req.params, reply);
+      if (!herdId) return;
 
-      await db.delete(herds).where(and(eq(herds.id, herdId), eq(herds.ranchId, ranchId)));
+      // Confirm the herd exists in this ranch + protect the transfer herd by name.
+      const existing = await db
+        .select({
+          id: herds.id,
+          name: herds.name,
+        })
+        .from(herds)
+        .where(and(eq(herds.id, herdId), eq(herds.ranchId, ranchId)))
+        .limit(1);
+
+      const herd = existing[0];
+      if (!herd) {
+        return reply.status(404).send({ error: "Herd not found" });
+      }
+
+      if ((herd.name ?? "").trim().toLowerCase() === TRANSFER_HERD_NAME) {
+        return reply.status(403).send({ error: "Transfer herd cannot be deleted" });
+      }
+
+      // Atomic delete only if herd is empty (no active memberships)
+      const deleted = await db
+        .delete(herds)
+        .where(
+          and(
+            eq(herds.id, herdId),
+            eq(herds.ranchId, ranchId),
+            sql`not exists (
+              select 1
+              from ${animalHerdMembership}
+              where ${animalHerdMembership.herdId} = ${herdId}
+                and ${animalHerdMembership.endAt} is null
+            )`
+          )
+        )
+        .returning({ id: herds.id });
+
+      if (deleted.length === 0) {
+        // We already verified the herd exists in this ranch, so this means it's not empty.
+        return reply.status(409).send({
+          error: "Cannot delete a herd that contains animals. Move or remove animals first.",
+        });
+      }
 
       return reply.send({ success: true });
     } catch (err) {
