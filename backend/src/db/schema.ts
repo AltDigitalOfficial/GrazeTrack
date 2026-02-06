@@ -82,6 +82,60 @@ export const userRanches = pgTable(
 );
 
 /**
+ * Ranch ↔ Species (animals raised) + per-species vocabulary
+ *
+ * Note: composite primary key (ranch_id, species)
+ */
+export const ranchSpecies = pgTable(
+  "ranch_species",
+  {
+    ranchId: pgUuid("ranch_id").notNull(),
+    species: text("species").notNull(),
+
+    maleDesc: text("male_desc"),
+    femaleDesc: text("female_desc"),
+    maleNeutDesc: text("male_neut_desc"),
+    femaleNeutDesc: text("female_neut_desc"),
+    babyDesc: text("baby_desc"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.ranchId, t.species] }),
+    ranchIdx: index("ranch_species_ranch_idx").on(t.ranchId),
+  })
+);
+
+/**
+ * Ranch Age Bands (per species)
+ *
+ * Note: no age-band gender-specific terms in this version.
+ */
+export const ranchAgeBands = pgTable(
+  "ranch_age_bands",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    species: text("species").notNull(),
+
+    label: text("label").notNull(),
+    teethDesc: text("teeth_desc"),
+
+    minMonths: integer("min_months").notNull(),
+    maxMonths: integer("max_months"),
+
+    sortOrder: integer("sort_order").default(0).notNull(),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    lookupIdx: index("ranch_age_bands_lookup_idx").on(t.ranchId, t.species, t.sortOrder),
+  })
+);
+
+/**
  * Herds
  */
 export const herds = pgTable(
