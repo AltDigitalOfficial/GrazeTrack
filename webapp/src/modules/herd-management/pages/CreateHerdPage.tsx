@@ -26,6 +26,10 @@ type RanchSettingsDTO = {
 
 type SpeciesOption = { value: string; label: string };
 
+type HerdBreedsResponse = {
+  breeds: string[];
+};
+
 const MIXED_VALUE = "Mixed";
 const OTHER_VALUE = "Other"; // Breed only
 
@@ -47,6 +51,10 @@ export default function CreateHerdPage() {
   // - otherBreedText is only used when breedMode === "Other"
   const [breedMode, setBreedMode] = useState<string>("");
   const [otherBreedText, setOtherBreedText] = useState<string>("");
+
+  // Ranch-specific previously-used breeds for the selected species
+  const [ranchBreedOptions, setRanchBreedOptions] = useState<string[]>([]);
+  const [loadingRanchBreeds, setLoadingRanchBreeds] = useState(false);
 
   const [longDescription, setLongDescription] = useState("");
 
@@ -94,7 +102,6 @@ export default function CreateHerdPage() {
         setRanchHasNoSpecies(false);
 
         // Build dropdown: ranch species first, then Mixed at bottom.
-        // Label: keep simple & aligned to stored value; Ranch Settings already defines the vocabulary.
         const opts: SpeciesOption[] = unique.map((v) => ({ value: v, label: v }));
         opts.push({ value: MIXED_VALUE, label: "Mixed" });
 
@@ -160,6 +167,51 @@ export default function CreateHerdPage() {
     };
   }, [isEdit, herdId]);
 
+  // Load ranch-specific previously-used breeds whenever species changes (and isn't Mixed)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRanchBreeds() {
+      // Clear when species is empty or Mixed
+      if (!species || isMixedSpecies) {
+        setRanchBreedOptions([]);
+        return;
+      }
+
+      setLoadingRanchBreeds(true);
+      try {
+        const qs = new URLSearchParams({ species }).toString();
+        const resp = await apiGet<HerdBreedsResponse>(`/herds/breeds?${qs}`);
+        if (cancelled) return;
+
+        const raw = Array.isArray(resp?.breeds) ? resp.breeds : [];
+        const seen = new Set<string>();
+        const unique = raw
+          .map((b) => (b ?? "").trim())
+          .filter((b) => b.length > 0 && b !== MIXED_VALUE)
+          .filter((b) => {
+            const key = b.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+
+        setRanchBreedOptions(unique);
+      } catch {
+        if (cancelled) return;
+        // Non-blocking: we can still use standard lookup + Other free-entry
+        setRanchBreedOptions([]);
+      } finally {
+        if (!cancelled) setLoadingRanchBreeds(false);
+      }
+    }
+
+    loadRanchBreeds();
+    return () => {
+      cancelled = true;
+    };
+  }, [species, isMixedSpecies]);
+
   const standardBreedOptions = useMemo(() => {
     if (!species) return [];
     if (isMixedSpecies) return [];
@@ -187,6 +239,16 @@ export default function CreateHerdPage() {
     });
   }, [standardBreedOptions]);
 
+  // Dedup lookup breeds against ranch breeds (case-insensitive) so ranch values appear once.
+  const dedupedLookupBreedOptions = useMemo(() => {
+    const ranchKeys = new Set(ranchBreedOptions.map((b) => b.toLowerCase()));
+    return cleanedStandardBreedOptions.filter((b) => {
+      const v = (b.value ?? "").trim();
+      if (!v) return false;
+      return !ranchKeys.has(v.toLowerCase());
+    });
+  }, [cleanedStandardBreedOptions, ranchBreedOptions]);
+
   useEffect(() => {
     // If species changes, keep dependent fields explicit.
     if (!species) {
@@ -212,11 +274,17 @@ export default function CreateHerdPage() {
     if (breedMode === MIXED_VALUE) return;
     if (breedMode === OTHER_VALUE) return;
 
-    if (cleanedStandardBreedOptions.length === 0) return;
+    const inRanchList = ranchBreedOptions.some((b) => b.toLowerCase() === breedMode.toLowerCase());
+    const inLookupList = dedupedLookupBreedOptions.some(
+      (b) => (b.value ?? "").toLowerCase() === breedMode.toLowerCase()
+    );
 
-    const valid = cleanedStandardBreedOptions.some((b) => b.value === breedMode);
-    if (!valid) setBreedMode("");
-  }, [species, isMixedSpecies, breedMode, otherBreedText, cleanedStandardBreedOptions]);
+    // If we have options and the selected value is not one of them, clear it.
+    // This keeps the old behavior without forcing you to type it again.
+    if ((ranchBreedOptions.length > 0 || dedupedLookupBreedOptions.length > 0) && !inRanchList && !inLookupList) {
+      setBreedMode("");
+    }
+  }, [species, isMixedSpecies, breedMode, otherBreedText, ranchBreedOptions, dedupedLookupBreedOptions]);
 
   const resolvedBreedForPayload = useMemo(() => {
     if (isMixedSpecies) return undefined;
@@ -307,11 +375,7 @@ export default function CreateHerdPage() {
             raise on this ranch.
           </div>
           <div>
-            <Button
-              variant="outline"
-              onClick={() => navigate(ROUTES.admin.ranch)}
-              disabled={loading}
-            >
+            <Button variant="outline" onClick={() => navigate(ROUTES.admin.ranch)} disabled={loading}>
               Go to Ranch Settings
             </Button>
           </div>
@@ -357,9 +421,7 @@ export default function CreateHerdPage() {
               onChange={(e) => setSpecies(e.target.value)}
               disabled={loading || loadingRanchSettings || (!isEdit && ranchHasNoSpecies)}
             >
-              <option value="">
-                {loadingRanchSettings ? "Loading species…" : "Select species…"}
-              </option>
+              <option value="">{loadingRanchSettings ? "Loading species…" : "Select species…"}</option>
               {speciesOptions.map((s) => (
                 <option key={s.value} value={s.value}>
                   {s.label}
@@ -392,10 +454,21 @@ export default function CreateHerdPage() {
                 {isMixedSpecies
                   ? "Breed disabled for Mixed herds"
                   : species
-                  ? "Select breed…"
+                  ? loadingRanchBreeds
+                    ? "Loading breeds…"
+                    : "Select breed…"
                   : "Select species first…"}
               </option>
 
+              {/* Ranch-entered breeds (DB-sourced) at the top */}
+              {!isMixedSpecies &&
+                ranchBreedOptions.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+
+              {/* Special options */}
               {!isMixedSpecies && (
                 <>
                   <option value={MIXED_VALUE}>Mixed</option>
@@ -403,8 +476,9 @@ export default function CreateHerdPage() {
                 </>
               )}
 
+              {/* Lookup breeds (deduped against ranch-entered breeds) */}
               {!isMixedSpecies &&
-                cleanedStandardBreedOptions.map((b) => (
+                dedupedLookupBreedOptions.map((b) => (
                   <option key={b.value} value={b.value}>
                     {b.label}
                   </option>

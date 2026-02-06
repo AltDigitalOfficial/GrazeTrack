@@ -36,11 +36,7 @@ async function getActiveRanchId(userId: string): Promise<string | null> {
  * TODO (next increment): validate against ranch-defined species for this ranchId
  * once ranch species tables are imported here (e.g., ranch_species join).
  */
-const speciesSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .or(z.literal(MIXED_VALUE));
+const speciesSchema = z.string().trim().min(1).or(z.literal(MIXED_VALUE));
 
 /**
  * Breed rules:
@@ -70,6 +66,10 @@ const herdCreateSchema = z.object({
 });
 
 const herdUpdateSchema = herdCreateSchema.partial();
+
+const herdBreedsQuerySchema = z.object({
+  species: z.string().trim().min(1),
+});
 
 export async function herdRoutes(app: FastifyInstance) {
   /**
@@ -101,6 +101,65 @@ export async function herdRoutes(app: FastifyInstance) {
     } catch (err) {
       req.log.error({ err }, "Failed to list herds");
       return reply.status(500).send({ error: "Failed to list herds" });
+    }
+  });
+
+  /**
+   * LIST distinct breeds for a ranch + species (most recent first)
+   *
+   * IMPORTANT: this route MUST be declared before /herds/:id
+   * or "breeds" will be treated as an id param.
+   */
+  app.get("/herds/breeds", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const ranchId = await getActiveRanchId(req.auth!.userId);
+      if (!ranchId) {
+        return reply.status(400).send({ error: "No ranch selected" });
+      }
+
+      const parsed = herdBreedsQuerySchema.safeParse(req.query ?? {});
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "Invalid query",
+          details: parsed.error.flatten(),
+        });
+      }
+
+      const species = parsed.data.species.trim();
+
+      const rows = await db
+        .select({
+          breed: herds.breed,
+          createdAt: herds.createdAt,
+        })
+        .from(herds)
+        .where(and(eq(herds.ranchId, ranchId), eq(herds.species, species)))
+        .orderBy(herds.createdAt)
+        .limit(500);
+
+      // rows oldest -> newest, walk backwards for "most recent first"
+      const seen = new Set<string>();
+      const breeds: string[] = [];
+
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const b = (rows[i]?.breed ?? "").trim();
+        if (!b) continue;
+
+        if (b === MIXED_VALUE) continue;
+
+        const key = b.toLowerCase();
+        if (seen.has(key)) continue;
+
+        seen.add(key);
+        breeds.push(b);
+
+        if (breeds.length >= 50) break;
+      }
+
+      return reply.send({ breeds });
+    } catch (err) {
+      req.log.error({ err }, "Failed to list herd breeds");
+      return reply.status(500).send({ error: "Failed to list herd breeds" });
     }
   });
 
