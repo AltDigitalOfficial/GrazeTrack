@@ -54,6 +54,14 @@ function formatTag(a: AnimalRow) {
   return a.tagColor ? `${a.tagNumber} (${a.tagColor})` : a.tagNumber;
 }
 
+function TagPill({ tagNumber, tagColor }: { tagNumber: string | null; tagColor: string | null }) {
+  if (!tagNumber) return <span className="text-muted-foreground">—</span>;
+
+  const base = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
+  
+  return <span className={`${base} bg-${tagColor}-100 text-${tagColor}-800`}>{tagNumber}</span>;
+}
+
 function StatusPill({ status }: { status: string | null }) {
   if (!status) return <span className="text-muted-foreground">—</span>;
 
@@ -366,7 +374,9 @@ export default function AnimalInventoryListPage() {
             <tbody>
               {filtered.map((a) => (
                 <tr key={a.animalId} className="border-b last:border-b-0">
-                  <td className="py-2 font-medium">{formatTag(a)}</td>
+                  <td className="py-2 font-medium">
+                    <TagPill tagNumber={a.tagNumber} tagColor={a.tagColor} />
+                  </td>
                   <td className="py-2">{a.species ?? "—"}</td>
                   <td className="py-2">{a.breed ?? "—"}</td>
                   <td className="py-2">{a.sex ?? "—"}</td>
