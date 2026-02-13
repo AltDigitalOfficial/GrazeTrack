@@ -548,7 +548,19 @@ export const standardMedications = pgTable(
     onLabelDoseText: text("on_label_dose_text"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
+
+    // Which ranch species this medication applies to.
+    // Stored as an array of the species strings from Ranch Settings.
+    applicableSpecies: text("applicable_species").array(),
+
+    // Structured on-label dose (for future dosage math)
+    // Example: 1.0 mL per 100 lb -> doseAmount=1.0, doseUnit="mL", perAmount=100, perUnit="lb"
+    onLabelDoseAmount: decimal("on_label_dose_amount"),
+    onLabelDoseUnit: text("on_label_dose_unit"),
+    onLabelPerAmount: decimal("on_label_per_amount"),
+    onLabelPerUnit: text("on_label_per_unit"),
+
+},
   (t) => ({
     ranchIdx: index("standard_meds_ranch_idx").on(t.ranchId),
     chemicalIdx: index("standard_meds_chemical_idx").on(t.ranchId, t.chemicalName),
@@ -572,6 +584,12 @@ export const ranchMedicationStandards = pgTable(
     endDate: date("end_date"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+
+    // Structured ranch standard dose (for future dosage math)
+    standardDoseAmount: decimal("standard_dose_amount"),
+    standardDoseUnit: text("standard_dose_unit"),
+    standardPerAmount: decimal("standard_per_amount"),
+    standardPerUnit: text("standard_per_unit"),
   },
   (t) => ({
     ranchIdx: index("ranch_med_standards_ranch_idx").on(t.ranchId),
