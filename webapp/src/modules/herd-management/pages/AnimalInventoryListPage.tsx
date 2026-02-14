@@ -49,11 +49,6 @@ function normalize(s: string) {
   return s.trim().toLowerCase();
 }
 
-function formatTag(a: AnimalRow) {
-  if (!a.tagNumber) return "—";
-  return a.tagColor ? `${a.tagNumber} (${a.tagColor})` : a.tagNumber;
-}
-
 function TagPill({ tagNumber, tagColor }: { tagNumber: string | null; tagColor: string | null }) {
   if (!tagNumber) return <span className="text-muted-foreground">—</span>;
 
@@ -95,6 +90,11 @@ function makeDamDisplay(a: AnimalRow) {
   return `${tag}${breed}${herd}`;
 }
 
+function getErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message.trim()) return err.message;
+  return fallback;
+}
+
 export default function AnimalInventoryListPage() {
   const navigate = useNavigate();
 
@@ -126,8 +126,8 @@ export default function AnimalInventoryListPage() {
       // ✅ Correct API route (apiGet prefixes "/api")
       const res = await apiGet<AnimalsResponse>("/animals");
       setRows(res.animals ?? []);
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to load animals");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to load animals"));
     } finally {
       setLoading(false);
     }
@@ -135,7 +135,6 @@ export default function AnimalInventoryListPage() {
 
   React.useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const speciesOptions = React.useMemo(() => {

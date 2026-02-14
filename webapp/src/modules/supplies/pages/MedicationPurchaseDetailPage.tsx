@@ -82,10 +82,6 @@ function ImageCarousel({
 }) {
   const [idx, setIdx] = useState(0);
 
-  useEffect(() => {
-    setIdx(0);
-  }, [images?.length]);
-
   if (!images || images.length === 0) {
     return <div className="text-sm text-muted-foreground">No photos.</div>;
   }
@@ -198,8 +194,9 @@ export default function MedicationPurchaseDetailPage() {
           `/medication-purchases/${encodeURIComponent(purchaseId!)}`
         );
         setPurchase(res.purchase);
-      } catch (e: any) {
-        setError(e?.message || "Failed to load purchase");
+      } catch (err: unknown) {
+        const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load purchase";
+        setError(msg);
         setPurchase(null);
       } finally {
         setLoading(false);
@@ -220,8 +217,9 @@ export default function MedicationPurchaseDetailPage() {
           `/medication-purchases/${encodeURIComponent(purchaseId!)}/images`
         );
         setImages(res.images ?? []);
-      } catch (e: any) {
-        setImagesError(e?.message || "Failed to load purchase images");
+      } catch (err: unknown) {
+        const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load purchase images";
+        setImagesError(msg);
         setImages([]);
       } finally {
         setLoadingImages(false);

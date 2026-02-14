@@ -30,11 +30,22 @@ import ListZonesPage from "./modules/land-management/pages/ListZonesPage";
 import CreateZonePage from "./modules/land-management/pages/CreateZonePage";
 import EditZonePage from "./modules/land-management/pages/EditZonePage";
 import PasturesFencesPage from "./modules/land-management/pages/PasturesFencesPage";
+import WaterPointsPage from "./modules/land-management/pages/WaterPointsPage";
+import SoilVegetationPage from "./modules/land-management/pages/SoilVegetationPage";
+import GrazingPlansPage from "./modules/land-management/pages/GrazingPlansPage";
+
+// Hardware
+import HardwareOverviewPage from "./modules/hardware-management/pages/HardwareOverviewPage";
+import VehiclesPage from "./modules/hardware-management/pages/VehiclesPage";
+import TractorsPage from "./modules/hardware-management/pages/TractorsPage";
 
 // Supplies (Medications etc)
 import MedicationsOverviewPage from "./modules/supplies/pages/MedicationsPage";
+import SuppliesOverviewPage from "./modules/supplies/pages/SuppliesOverviewPage";
 import CreateStandardMedicationPage from "./modules/supplies/pages/CreateStandardMedicationsPage";
 import CreateMedicationPurchasePage from "./modules/supplies/pages/CreateMedicationPurchasePage";
+import MedicationHistoryPage from "./modules/supplies/pages/MedicationHistoryPage";
+import MedicationPurchaseDetailPage from "./modules/supplies/pages/MedicationPurchaseDetailPage";
 import FeedSuppliesPage from "./modules/supplies/pages/FeedPage";
 import MineralSupplementsPage from "./modules/supplies/pages/MineralsPage";
 import FuelSuppliesPage from "./modules/supplies/pages/FuelPage";
@@ -42,6 +53,7 @@ import ToolsSuppliesPage from "./modules/supplies/pages/ToolsPage";
 
 // Services
 import VetsPage from "./modules/services/pages/VetsPage";
+import ServicesOverviewPage from "./modules/services/pages/ServicesOverviewPage";
 import SpecialistsPage from "./modules/services/pages/SpecialistsPage";
 import FeedSuppliersPage from "./modules/services/pages/FeedSuppliersPage";
 import ContractorsPage from "./modules/services/pages/ContractorsPage";
@@ -98,18 +110,30 @@ export const router = createBrowserRouter([
           { path: ROUTES.land.zonesCreate, element: <CreateZonePage /> },
           { path: ROUTES.land.zonesEdit, element: <EditZonePage /> },
           { path: ROUTES.land.pastures, element: <PasturesFencesPage /> },
+          { path: ROUTES.land.water, element: <WaterPointsPage /> },
+          { path: ROUTES.land.soil, element: <SoilVegetationPage /> },
+          { path: ROUTES.land.grazing, element: <GrazingPlansPage /> },
+
+          // Hardware
+          { path: ROUTES.hardware.root, element: <HardwareOverviewPage /> },
+          { path: ROUTES.hardware.vehicles, element: <VehiclesPage /> },
+          { path: ROUTES.hardware.tractors, element: <TractorsPage /> },
 
           // Supplies
+          { path: ROUTES.supplies.root, element: <SuppliesOverviewPage /> },
           { path: ROUTES.supplies.feed, element: <FeedSuppliesPage /> },
           { path: ROUTES.supplies.minerals, element: <MineralSupplementsPage /> },
           { path: ROUTES.supplies.fuel, element: <FuelSuppliesPage /> },
           { path: ROUTES.supplies.tools, element: <ToolsSuppliesPage /> },
 
           { path: ROUTES.supplies.medications, element: <MedicationsOverviewPage /> },
+          { path: ROUTES.supplies.medicationsHistory, element: <MedicationHistoryPage /> },
+          { path: ROUTES.supplies.medicationsPurchaseDetail, element: <MedicationPurchaseDetailPage /> },
           { path: ROUTES.supplies.medicationsStandardsCreate, element: <CreateStandardMedicationPage /> },
           { path: ROUTES.supplies.medicationsPurchasesCreate, element: <CreateMedicationPurchasePage /> },
 
           // Services
+          { path: ROUTES.services.root, element: <ServicesOverviewPage /> },
           { path: ROUTES.services.vets, element: <VetsPage /> },
           { path: ROUTES.services.specialists, element: <SpecialistsPage /> },
           { path: ROUTES.services.feedSuppliers, element: <FeedSuppliersPage /> },

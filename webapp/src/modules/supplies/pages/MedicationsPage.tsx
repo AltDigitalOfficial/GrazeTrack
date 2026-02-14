@@ -4,33 +4,25 @@ import { useNavigate } from "react-router-dom";
 import { ROUTES } from "@/routes";
 import { apiGet, apiPost } from "@/lib/api";
 import { useRanch } from "@/lib/ranchContext";
+import {
+  MedicationInventoryResponseSchema,
+  MedicationStandardsResponseSchema,
+  type MedicationInventoryRow,
+  type MedicationStandardRow,
+} from "@/lib/contracts/medications";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
-type InventoryRow = {
-  id: string;
-  displayName: string;
-  quantity: string; // backend returns string
-  unit: string; // derived canonical unit
-  lastPurchaseDate: string | null;
-};
-
-type StandardRow = {
-  id: string;
-  standardMedicationId: string;
-  medicationDisplayName: string;
-  usesOffLabel: boolean;
-  standardDoseText: string;
-  startDate: string;
-  endDate: string | null;
-  createdAt: string | Date;
-};
-
 function toNumberSafe(v: string): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function getErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message.trim()) return err.message;
+  return fallback;
 }
 
 export default function MedicationsPage() {
@@ -39,8 +31,8 @@ export default function MedicationsPage() {
 
   const [showRetired, setShowRetired] = useState(false);
 
-  const [inventory, setInventory] = useState<InventoryRow[]>([]);
-  const [standards, setStandards] = useState<StandardRow[]>([]);
+  const [inventory, setInventory] = useState<MedicationInventoryRow[]>([]);
+  const [standards, setStandards] = useState<MedicationStandardRow[]>([]);
 
   const [loadingInventory, setLoadingInventory] = useState(false);
   const [loadingStandards, setLoadingStandards] = useState(false);
@@ -55,7 +47,11 @@ export default function MedicationsPage() {
   const goToPurchasesCreate = () => navigate(ROUTES.supplies.medicationsPurchasesCreate);
 
   const goToMedicationHistory = (standardMedicationId: string, displayName?: string) => {
-    navigate(`/supplies/medications/${encodeURIComponent(standardMedicationId)}/history`, {
+    const path = ROUTES.supplies.medicationsHistory.replace(
+      ":standardMedicationId",
+      encodeURIComponent(standardMedicationId)
+    );
+    navigate(path, {
       state: { medicationDisplayName: displayName ?? null },
     });
   };
@@ -65,33 +61,31 @@ export default function MedicationsPage() {
     [ranchLoading, activeRanchId]
   );
 
-  async function loadInventory(ranchId: string) {
+  async function loadInventory() {
     setLoadingInventory(true);
     setInventoryError(null);
     try {
-      const res = await apiGet<{ inventory: InventoryRow[] }>(
-        `/medications/inventory?ranchId=${encodeURIComponent(ranchId)}`
-      );
+      const resRaw = await apiGet(`/medications/inventory`);
+      const res = MedicationInventoryResponseSchema.parse(resRaw);
       setInventory(res.inventory ?? []);
-    } catch (e: any) {
-      setInventoryError(e?.message || "Failed to load inventory");
+    } catch (err: unknown) {
+      setInventoryError(getErrorMessage(err, "Failed to load inventory"));
     } finally {
       setLoadingInventory(false);
     }
   }
 
-  async function loadStandards(ranchId: string, includeRetired: boolean) {
+  async function loadStandards(includeRetired: boolean) {
     setLoadingStandards(true);
     setStandardsError(null);
     try {
-      const res = await apiGet<{ standards: StandardRow[] }>(
-        `/ranch-medication-standards?ranchId=${encodeURIComponent(
-          ranchId
-        )}&includeRetired=${includeRetired ? "true" : "false"}`
+      const resRaw = await apiGet(
+        `/ranch-medication-standards?includeRetired=${includeRetired ? "true" : "false"}`
       );
+      const res = MedicationStandardsResponseSchema.parse(resRaw);
       setStandards(res.standards ?? []);
-    } catch (e: any) {
-      setStandardsError(e?.message || "Failed to load medication standards");
+    } catch (err: unknown) {
+      setStandardsError(getErrorMessage(err, "Failed to load medication standards"));
     } finally {
       setLoadingStandards(false);
     }
@@ -99,14 +93,12 @@ export default function MedicationsPage() {
 
   useEffect(() => {
     if (!activeRanchId) return;
-    loadInventory(activeRanchId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadInventory();
   }, [activeRanchId]);
 
   useEffect(() => {
     if (!activeRanchId) return;
-    loadStandards(activeRanchId, showRetired);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadStandards(showRetired);
   }, [activeRanchId, showRetired]);
 
   async function retireStandard(standardId: string) {
@@ -120,9 +112,9 @@ export default function MedicationsPage() {
         ranchId: activeRanchId,
       });
 
-      await loadStandards(activeRanchId, showRetired);
-    } catch (e: any) {
-      setRetireError(e?.message || "Failed to retire standard");
+      await loadStandards(showRetired);
+    } catch (err: unknown) {
+      setRetireError(getErrorMessage(err, "Failed to retire standard"));
     } finally {
       setRetiringId(null);
     }

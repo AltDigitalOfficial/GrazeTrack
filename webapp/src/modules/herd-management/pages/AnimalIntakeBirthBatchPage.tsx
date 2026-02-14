@@ -47,35 +47,23 @@ export default function AnimalIntakeBirthBatchPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+  const locationState = location.state as LocationState | null;
+  const state: LocationState = locationState ?? {
+    species: "",
+    gaveBirthDate: "",
+    totalBabies: 1,
+    selectedDamIds: [],
+    selectedDamsPreview: [],
+  };
 
   // Redirect if user lands here without navigation state (refresh/bookmark/direct URL).
   React.useEffect(() => {
-    if (!location.state) {
+    if (!locationState) {
       navigate(ROUTES.herd.animals, { replace: true });
     }
-  }, [location.state, navigate]);
-
-  if (!location.state) {
-    // While redirecting
-    return (
-      <div className="p-4 md:p-6 space-y-4">
-        <Card className="rounded-2xl">
-          <CardHeader>
-            <CardTitle>Birth batch</CardTitle>
-            <CardDescription>Redirecting…</CardDescription>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Returning to inventory.
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const state = location.state as LocationState;
+  }, [locationState, navigate]);
 
   const [saving, setSaving] = React.useState(false);
-
   const [babies, setBabies] = React.useState<BabyDraft[]>(() => {
     const total = Math.max(1, Math.min(100, Number(state.totalBabies || 1)));
     const date = state.gaveBirthDate || "";
@@ -111,6 +99,22 @@ export default function AnimalIntakeBirthBatchPage() {
       })
     );
   }, [state.totalBabies, state.gaveBirthDate]);
+
+  if (!locationState) {
+    return (
+      <div className="p-4 md:p-6 space-y-4">
+        <Card className="rounded-2xl">
+          <CardHeader>
+            <CardTitle>Birth batch</CardTitle>
+            <CardDescription>Redirecting...</CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Returning to inventory.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   function updateBaby(index: number, patch: Partial<BabyDraft>) {
     setBabies((prev) => prev.map((b) => (b.index === index ? { ...b, ...patch } : b)));
@@ -171,9 +175,7 @@ export default function AnimalIntakeBirthBatchPage() {
         title: "Batch ready (UI only)",
         description: "Next increment wires the backend calls.",
       });
-
-      // eslint-disable-next-line no-console
-      console.log("Birth batch payload preview:", payloadPreview);
+      void payloadPreview;
     } finally {
       setSaving(false);
     }

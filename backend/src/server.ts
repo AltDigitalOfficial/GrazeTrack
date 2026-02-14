@@ -3,6 +3,7 @@ import fastifyMultipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import path from "path";
 import cors from "@fastify/cors";
+import { config } from "./config";
 
 import { ranchRoutes } from "./routes/ranches";
 import { meRoutes } from "./routes/me";
@@ -26,13 +27,13 @@ async function start() {
 
   // Serve static files from the images directory (your existing setup)
   app.register(fastifyStatic, {
-    root: path.join("c:/AltDigital/allcode/grazetrack-platform/images"),
+    root: path.join(config.IMAGES_ROOT),
     prefix: "/images/",
   });
 
   // Enable CORS for frontend dev server
   await app.register(cors, {
-    origin: "http://localhost:5173",
+    origin: config.CORS_ORIGIN,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -48,8 +49,8 @@ async function start() {
   app.register(animalsRoutes, { prefix: "/api" });
   
   try {
-    await app.listen({ port: 3001, host: "0.0.0.0" });
-    console.log("GrazeTrack API running on http://localhost:3001");
+    await app.listen({ port: config.API_PORT, host: config.API_HOST });
+    console.log(`GrazeTrack API running on http://${config.API_HOST}:${config.API_PORT}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

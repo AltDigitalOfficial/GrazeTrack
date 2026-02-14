@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
+import path from "path";
 
 import { db } from "../db";
 import {
@@ -19,6 +20,8 @@ import {
   userRanches,
 } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
+import { ensureRanchStructure, saveUploadedFile } from "../../lib/storage.js";
+import { ExistingInventoryIntakeSchema } from "../contracts/animals";
 
 /* ------------------------------------------------------------------------------------------------
  * Helpers
@@ -128,6 +131,37 @@ function sendError(reply: any, err: any) {
     error: err?.message ?? "Unexpected server error",
     pg: pgMessage,
   });
+}
+
+function todayIsoDate(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+async function getOrCreateTransferHerd(ranchId: string): Promise<string> {
+  const existing = await db
+    .select({ id: herds.id })
+    .from(herds)
+    .where(and(eq(herds.ranchId, ranchId), eq(herds.name, "Transfer")))
+    .limit(1);
+
+  if (existing[0]) return existing[0].id;
+
+  const transferHerdId = uuid();
+  await db.insert(herds).values({
+    id: transferHerdId,
+    ranchId,
+    name: "Transfer",
+    shortDescription: "System-managed holding herd.",
+    longDescription: "System-managed holding herd.",
+    species: null,
+    breed: null,
+  });
+
+  return transferHerdId;
 }
 
 async function insertCurrentTag(args: {
@@ -627,6 +661,225 @@ export async function animalsRoutes(app: FastifyInstance) {
         intakeEventId: intakeId,
       });
     } catch (err: any) {
+      return sendError(reply, err);
+    }
+  });
+
+  /**
+   * POST /api/animal-intake/existing-inventory
+   *
+   * Compatibility endpoint for the existing frontend intake form.
+   * Uses the user's active ranch and assigns the animal to the Transfer herd.
+   */
+  app.post("/animal-intake/existing-inventory", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const parsed = ExistingInventoryIntakeSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid existing inventory payload", details: parsed.error.flatten() });
+      }
+
+      const ranchId = await getActiveRanchId(req.auth!.userId);
+      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+
+      const herdId = await getOrCreateTransferHerd(ranchId);
+      const now = new Date();
+      const payload = parsed.data;
+
+      const animalId = uuid();
+      const membershipId = uuid();
+      const intakeEventId = uuid();
+
+      const normalizedSex = payload.sex === "neutered" ? "unknown" : payload.sex;
+      const isNeutered = payload.sex === "neutered";
+
+      await db.transaction(async (tx) => {
+        await tx.insert(animals).values({
+          id: animalId,
+          tag: null,
+          notes: payload.notes ?? null,
+          species: payload.species,
+          breed: payload.breed ?? null,
+          sex: normalizedSex,
+          birthDate: payload.birthDate ?? null,
+          birthDateIsEstimated: payload.isBirthDateEstimated ?? false,
+          status: "active",
+          statusChangedAt: null,
+          damAnimalId: null,
+          sireAnimalId: null,
+          neutered: isNeutered,
+          neuteredDate: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+
+        await tx.insert(animalHerdMembership).values({
+          id: membershipId,
+          animalId,
+          herdId,
+          startAt: now,
+          endAt: null,
+          createdAt: now,
+        });
+
+        await tx.insert(animalIntakeEvents).values({
+          id: intakeEventId,
+          ranchId,
+          herdId,
+          animalId,
+          intakeType: "purchase",
+          eventDate: todayIsoDate(),
+          bornOnRanch: null,
+          damAnimalId: null,
+          sireAnimalId: null,
+          supplierName: null,
+          purchasePriceCents: null,
+          purchaseCurrency: null,
+          createdAt: now,
+        });
+
+        await insertCurrentTag({
+          tx,
+          animalId,
+          tagNumber: payload.tag?.tagNumber ?? null,
+          tagColor: payload.tag?.tagColor ?? null,
+          tagEar: payload.tag?.tagEar ?? null,
+          at: now,
+          changeReason: "existing_inventory_intake",
+          changedByUserId: null,
+        });
+
+        if (payload.initialWeightLbs != null) {
+          await tx.insert(animalMeasurements).values({
+            id: uuid(),
+            ranchId,
+            herdId,
+            animalId,
+            measurementType: "weight",
+            valueNumber: String(payload.initialWeightLbs),
+            valueText: null,
+            unit: "lb",
+            notes: "Recorded at existing inventory intake",
+            measuredAt: now,
+            createdAt: now,
+          });
+        }
+      });
+
+      return reply.status(201).send({ animalId, herdId, ranchId, membershipId, intakeEventId });
+    } catch (err: unknown) {
+      return sendError(reply, err);
+    }
+  });
+
+  /**
+   * POST /api/animals/:animalId/photos
+   */
+  app.post("/animals/:animalId/photos", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const animalId = (req.params as { animalId?: string })?.animalId;
+      if (!animalId) return reply.status(400).send({ error: "Missing animalId" });
+
+      const scope = await requireCurrentMembershipScope(req.auth!.userId, animalId);
+      const ranchRoot = await ensureRanchStructure(scope.ranchId);
+
+      const files: any[] = [];
+      const fields: Record<string, string> = {};
+
+      if (typeof (req as any).parts === "function") {
+        for await (const part of (req as any).parts()) {
+          if (part.type === "file") files.push(part);
+          else fields[part.fieldname] = String(part.value ?? "");
+        }
+      }
+
+      const category = (fields.category || "misc").trim() || "misc";
+      const saved = [];
+
+      for (const file of files) {
+        const destDir = path.join(ranchRoot, "animals", animalId, "photos", category);
+        const stored = await saveUploadedFile(file, destDir);
+
+        const photoId = uuid();
+        await db.insert(animalPhotos).values({
+          id: photoId,
+          ranchId: scope.ranchId,
+          herdId: scope.herdId,
+          animalId,
+          purpose: category,
+          storedFilename: stored.filename,
+          originalFilename: file.filename ?? null,
+          mimeType: file.mimetype ?? null,
+          sizeBytes: typeof file.file?.bytesRead === "number" ? file.file.bytesRead : null,
+          width: null,
+          height: null,
+          capturedAt: null,
+          caption: null,
+          createdAt: new Date(),
+        });
+
+        saved.push({
+          id: photoId,
+          url: `/images/ranches/${scope.ranchId}/animals/${animalId}/photos/${category}/${stored.filename}`,
+        });
+      }
+
+      return reply.status(201).send({ uploaded: saved.length, photos: saved });
+    } catch (err: unknown) {
+      return sendError(reply, err);
+    }
+  });
+
+  /**
+   * POST /api/animals/:animalId/documents
+   */
+  app.post("/animals/:animalId/documents", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const animalId = (req.params as { animalId?: string })?.animalId;
+      if (!animalId) return reply.status(400).send({ error: "Missing animalId" });
+
+      const scope = await requireCurrentMembershipScope(req.auth!.userId, animalId);
+      const ranchRoot = await ensureRanchStructure(scope.ranchId);
+
+      const files: any[] = [];
+      const fields: Record<string, string> = {};
+
+      if (typeof (req as any).parts === "function") {
+        for await (const part of (req as any).parts()) {
+          if (part.type === "file") files.push(part);
+          else fields[part.fieldname] = String(part.value ?? "");
+        }
+      }
+
+      const category = (fields.category || "misc").trim() || "misc";
+      const saved = [];
+
+      for (const file of files) {
+        const destDir = path.join(ranchRoot, "animals", animalId, "documents", category);
+        const stored = await saveUploadedFile(file, destDir);
+
+        const documentId = uuid();
+        await db.insert(animalDocuments).values({
+          id: documentId,
+          ranchId: scope.ranchId,
+          herdId: scope.herdId,
+          animalId,
+          purpose: category,
+          storedFilename: stored.filename,
+          originalFilename: file.filename ?? null,
+          mimeType: file.mimetype ?? null,
+          sizeBytes: typeof file.file?.bytesRead === "number" ? file.file.bytesRead : null,
+          caption: null,
+          createdAt: new Date(),
+        });
+
+        saved.push({
+          id: documentId,
+          url: `/images/ranches/${scope.ranchId}/animals/${animalId}/documents/${category}/${stored.filename}`,
+        });
+      }
+
+      return reply.status(201).send({ uploaded: saved.length, documents: saved });
+    } catch (err: unknown) {
       return sendError(reply, err);
     }
   });

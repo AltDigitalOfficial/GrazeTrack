@@ -32,7 +32,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   
   const location = useLocation();
-  const from = (location.state as any)?.from || "/";
+  const from = ((location.state as { from?: string } | null)?.from) || "/";
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -63,8 +63,9 @@ export default function LoginPage() {
 
       // Firebase persists session automatically.
       navigate(from, { replace: true });
-    } catch (err: any) {
-      const code = typeof err?.code === "string" ? err.code : undefined;
+    } catch (err: unknown) {
+      const firebaseError = err as { code?: string };
+      const code = typeof firebaseError?.code === "string" ? firebaseError.code : undefined;
       setErrorMsg(friendlyFirebaseError(code));
       console.error("Firebase login error:", err);
     } finally {

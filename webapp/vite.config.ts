@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   // Pull from .env / .env.local if you have it.
   // If you already use VITE_API_BASE_URL for your api helpers, this will match it.
   const env = loadEnv(mode, process.cwd(), "");
-  const apiBase = (env.VITE_API_BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
+  const apiBase = (env.VITE_API_BASE_URL || "http://localhost:3001").replace(/\/+$/, "");
 
   return {
     plugins: [react()],
@@ -19,6 +19,10 @@ export default defineConfig(({ mode }) => {
       proxy: {
         // Static images are served by the backend (Fastify), not Vite.
         "/images": {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        "/api": {
           target: apiBase,
           changeOrigin: true,
         },

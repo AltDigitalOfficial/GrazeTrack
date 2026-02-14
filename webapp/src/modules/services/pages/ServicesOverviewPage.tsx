@@ -1,3 +1,5 @@
+import { ROUTES } from "@/routes";
+
 export default function ServicesOverviewPage() {
   return (
     <div className="p-6 space-y-6">
@@ -15,7 +17,7 @@ export default function ServicesOverviewPage() {
 
         {/* Vets */}
         <a
-          href="/services/vets"
+          href={ROUTES.services.vets}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Vets</h2>
@@ -26,7 +28,7 @@ export default function ServicesOverviewPage() {
 
         {/* Specialists */}
         <a
-          href="/services/specialists"
+          href={ROUTES.services.specialists}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Specialists</h2>
@@ -37,7 +39,7 @@ export default function ServicesOverviewPage() {
 
         {/* Feed Suppliers */}
         <a
-          href="/services/feed-suppliers"
+          href={ROUTES.services.feedSuppliers}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Feed Suppliers</h2>
@@ -48,7 +50,7 @@ export default function ServicesOverviewPage() {
 
         {/* Contractors */}
         <a
-          href="/services/contractors"
+          href={ROUTES.services.contractors}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Contractors</h2>
@@ -59,7 +61,7 @@ export default function ServicesOverviewPage() {
 
         {/* Equipment Rentals */}
         <a
-          href="/services/equipment-rentals"
+          href={ROUTES.services.equipmentRentals}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Equipment Rentals</h2>

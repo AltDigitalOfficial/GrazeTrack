@@ -1,6 +1,11 @@
 import { auth } from "@/lib/firebase";
 
-const API_BASE = "http://localhost:3001/api";
+const rawApiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+const normalizedApiBase = (rawApiBase && rawApiBase.length ? rawApiBase : "http://localhost:3001").replace(
+  /\/+$/,
+  ""
+);
+const API_BASE = `${normalizedApiBase}/api`;
 
 /**
  * Build Headers safely (no union types with undefined values).

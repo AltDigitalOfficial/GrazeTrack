@@ -137,8 +137,7 @@ function bytesToNiceSize(bytes?: number | null): string {
  * Purchase images (local selection)
  * ------------------------------------------------------------------------------------------------ */
 
-const PurchaseImagePurposeSchema = z.enum(["receipt", "label", "packaging", "misc"]);
-type PurchaseImagePurpose = z.infer<typeof PurchaseImagePurposeSchema>;
+type PurchaseImagePurpose = "receipt" | "label" | "packaging" | "misc";
 
 type LocalImage = {
   id: string;
@@ -174,10 +173,6 @@ function LocalImageCarousel({
   onRemove: (id: string) => void;
 }) {
   const [idx, setIdx] = useState(0);
-
-  useEffect(() => {
-    setIdx(0);
-  }, [images?.length]);
 
   if (!images || images.length === 0) {
     return <div className="text-sm text-muted-foreground">No photos selected.</div>;
@@ -278,10 +273,6 @@ function ImageCarousel({
   images: StandardMedicationImageDTO[];
 }) {
   const [idx, setIdx] = useState(0);
-
-  useEffect(() => {
-    setIdx(0);
-  }, [images?.length]);
 
   if (!images || images.length === 0) {
     return <div className="text-sm text-muted-foreground">No photos yet.</div>;
@@ -484,8 +475,9 @@ export default function CreateMedicationPurchasePage() {
           `/standard-medications/active`
         );
         setOptions(res.medications ?? []);
-      } catch (e: any) {
-        setOptionsError(e?.message || "Failed to load medications");
+      } catch (err: unknown) {
+        const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load medications";
+        setOptionsError(msg);
       } finally {
         setLoadingOptions(false);
       }
@@ -522,13 +514,15 @@ export default function CreateMedicationPurchasePage() {
         );
         if (!alive) return;
         setStandardImages(res.images ?? []);
-      } catch (e: any) {
+      } catch (err: unknown) {
         if (!alive) return;
         setStandardImages([]);
-        setStandardImagesError(e?.message || "Failed to load photos for this medication.");
+        const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load photos for this medication.";
+        setStandardImagesError(msg);
       } finally {
-        if (!alive) return;
-        setLoadingStandardImages(false);
+        if (alive) {
+          setLoadingStandardImages(false);
+        }
       }
     };
 
@@ -581,14 +575,14 @@ export default function CreateMedicationPurchasePage() {
       for (const [key, msg] of required) {
         const value = (parsed[key] as string | undefined) ?? "";
         if (value.trim().length === 0) {
-          form.setError(key as any, { type: "validate", message: msg });
+          form.setError(key, { type: "validate", message: msg });
           return;
         }
       }
     }
 
     // Base payload fields (we’ll use these for both JSON and multipart)
-    const basePayload: any = {
+    const basePayload: Record<string, unknown> = {
       quantity: parsed.quantity.trim(),
       purchaseDate: parsed.purchaseDate,
       totalPrice: parsed.totalPrice && parsed.totalPrice.trim().length > 0 ? parsed.totalPrice.trim() : null,
@@ -656,8 +650,8 @@ export default function CreateMedicationPurchasePage() {
 
       await apiPostForm("/medication-purchases", fd);
       navigate(ROUTES.supplies.medications);
-    } catch (e: any) {
-      const msg = e?.message || e?.response?.data?.error || "Failed to record purchase";
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to record purchase";
       form.setError("quantity", { type: "server", message: msg });
     }
   };

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { zones, userRanches } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
+import { logAndSendInternalError, sendError } from "../lib/http";
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
   const rows = await db
@@ -50,7 +51,7 @@ export async function zonesRoutes(app: FastifyInstance) {
   app.get("/zones", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
 
       const rows = await db
         .select({
@@ -67,9 +68,8 @@ export async function zonesRoutes(app: FastifyInstance) {
         .where(eq(zones.ranchId, ranchId));
 
       return reply.send(rows);
-    } catch (err: any) {
-      req.log.error({ err }, "Failed to list zones");
-      return reply.status(500).send({ error: "Failed to list zones" });
+    } catch (err: unknown) {
+      return logAndSendInternalError(req, reply, err, "LIST_ZONES_FAILED", "Failed to list zones");
     }
   });
 
@@ -77,9 +77,9 @@ export async function zonesRoutes(app: FastifyInstance) {
   app.get("/zones/:id", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
 
-      const zoneId = (req.params as any).id as string;
+      const zoneId = (req.params as { id: string }).id;
 
       const rows = await db
         .select({
@@ -96,12 +96,11 @@ export async function zonesRoutes(app: FastifyInstance) {
         .limit(1);
 
       const zone = rows[0];
-      if (!zone) return reply.status(404).send({ error: "Zone not found" });
+      if (!zone) return sendError(reply, 404, "ZONE_NOT_FOUND", "Zone not found");
 
       return reply.send(zone);
-    } catch (err: any) {
-      req.log.error({ err }, "Failed to get zone");
-      return reply.status(500).send({ error: "Failed to get zone" });
+    } catch (err: unknown) {
+      return logAndSendInternalError(req, reply, err, "GET_ZONE_FAILED", "Failed to get zone");
     }
   });
 
@@ -109,14 +108,11 @@ export async function zonesRoutes(app: FastifyInstance) {
   app.post("/zones", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
 
       const parsed = zoneCreateSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
-        return reply.status(400).send({
-          error: "Invalid zone payload",
-          details: parsed.error.flatten(),
-        });
+        return sendError(reply, 400, "INVALID_ZONE_PAYLOAD", "Invalid zone payload", parsed.error.flatten());
       }
 
       const data = parsed.data;
@@ -133,9 +129,8 @@ export async function zonesRoutes(app: FastifyInstance) {
       });
 
       return reply.status(201).send({ id: zoneId });
-    } catch (err: any) {
-      req.log.error({ err }, "Failed to create zone");
-      return reply.status(500).send({ error: "Failed to create zone" });
+    } catch (err: unknown) {
+      return logAndSendInternalError(req, reply, err, "CREATE_ZONE_FAILED", "Failed to create zone");
     }
   });
 
@@ -143,16 +138,13 @@ export async function zonesRoutes(app: FastifyInstance) {
   app.put("/zones/:id", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
 
-      const zoneId = (req.params as any).id as string;
+      const zoneId = (req.params as { id: string }).id;
 
       const parsed = zoneUpdateSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
-        return reply.status(400).send({
-          error: "Invalid zone payload",
-          details: parsed.error.flatten(),
-        });
+        return sendError(reply, 400, "INVALID_ZONE_PAYLOAD", "Invalid zone payload", parsed.error.flatten());
       }
 
       const data = parsed.data;
@@ -168,9 +160,8 @@ export async function zonesRoutes(app: FastifyInstance) {
         .where(and(eq(zones.id, zoneId), eq(zones.ranchId, ranchId)));
 
       return reply.send({ success: true });
-    } catch (err: any) {
-      req.log.error({ err }, "Failed to update zone");
-      return reply.status(500).send({ error: "Failed to update zone" });
+    } catch (err: unknown) {
+      return logAndSendInternalError(req, reply, err, "UPDATE_ZONE_FAILED", "Failed to update zone");
     }
   });
 
@@ -178,18 +169,17 @@ export async function zonesRoutes(app: FastifyInstance) {
   app.delete("/zones/:id", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
-      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      if (!ranchId) return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
 
-      const zoneId = (req.params as any).id as string;
+      const zoneId = (req.params as { id: string }).id;
 
       await db
         .delete(zones)
         .where(and(eq(zones.id, zoneId), eq(zones.ranchId, ranchId)));
 
       return reply.send({ success: true });
-    } catch (err: any) {
-      req.log.error({ err }, "Failed to delete zone");
-      return reply.status(500).send({ error: "Failed to delete zone" });
+    } catch (err: unknown) {
+      return logAndSendInternalError(req, reply, err, "DELETE_ZONE_FAILED", "Failed to delete zone");
     }
   });
 }

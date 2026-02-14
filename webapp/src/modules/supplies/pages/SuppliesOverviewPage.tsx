@@ -1,3 +1,5 @@
+import { ROUTES } from "@/routes";
+
 export default function SuppliesOverviewPage() {
   return (
     <div className="p-6 space-y-6">
@@ -17,7 +19,7 @@ export default function SuppliesOverviewPage() {
 
         {/* Feed */}
         <a
-          href="/supplies/feed"
+          href={ROUTES.supplies.feed}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Feed</h2>
@@ -28,7 +30,7 @@ export default function SuppliesOverviewPage() {
 
         {/* Minerals */}
         <a
-          href="/supplies/minerals"
+          href={ROUTES.supplies.minerals}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Minerals</h2>
@@ -39,7 +41,7 @@ export default function SuppliesOverviewPage() {
 
         {/* Medications */}
         <a
-          href="/supplies/medications"
+          href={ROUTES.supplies.medications}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Medications</h2>
@@ -50,7 +52,7 @@ export default function SuppliesOverviewPage() {
 
         {/* Fuel */}
         <a
-          href="/supplies/fuel"
+          href={ROUTES.supplies.fuel}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Fuel</h2>
@@ -61,7 +63,7 @@ export default function SuppliesOverviewPage() {
 
         {/* Tools */}
         <a
-          href="/supplies/tools"
+          href={ROUTES.supplies.tools}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Tools</h2>

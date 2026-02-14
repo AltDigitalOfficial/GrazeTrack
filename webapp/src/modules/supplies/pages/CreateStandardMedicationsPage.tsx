@@ -36,19 +36,16 @@ const concentrationUnitOptions = [
   "other",
 ] as const;
 
-const ImagePurposeSchema = z.enum(["label", "insert", "misc"]);
-type ImagePurpose = z.infer<typeof ImagePurposeSchema>;
+type ImagePurpose = "label" | "insert" | "misc";
 
-const LocalImageSchema = z.object({
-  id: z.string(),
-  file: z.instanceof(File),
-  url: z.string(),
-  originalName: z.string(),
-  mimeType: z.string().optional(),
-  sizeBytes: z.number().optional(),
-});
-
-type LocalImage = z.infer<typeof LocalImageSchema>;
+type LocalImage = {
+  id: string;
+  file: File;
+  url: string;
+  originalName: string;
+  mimeType?: string;
+  sizeBytes?: number;
+};
 
 const FormSchema = z.object({
   chemicalName: z.string().min(1, "Chemical name is required"),
@@ -105,10 +102,6 @@ function LocalImageCarousel({
   onRemove: (id: string) => void;
 }) {
   const [idx, setIdx] = useState(0);
-
-  useEffect(() => {
-    setIdx(0);
-  }, [images?.length]);
 
   if (!images || images.length === 0) {
     return <div className="text-sm text-muted-foreground">No photos selected.</div>;
@@ -336,8 +329,8 @@ export default function CreateStandardMedicationsPage() {
 
       await apiPostForm("/standard-medications", fd);
       navigate(ROUTES.supplies.medications);
-    } catch (e: any) {
-      const msg = e?.message || e?.response?.data?.error || "Failed to create standard medication";
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to create standard medication";
       form.setError("chemicalName", { type: "server", message: msg });
     }
   };

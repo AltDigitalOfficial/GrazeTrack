@@ -49,6 +49,8 @@ export const ROUTES = {
     minerals: "/supplies/minerals",
 
     medications: "/supplies/medications",
+    medicationsHistory: "/supplies/medications/:standardMedicationId/history",
+    medicationsPurchaseDetail: "/supplies/medications/purchases/:purchaseId",
     medicationsStandardsCreate: "/supplies/medications/standards/create",
     medicationsPurchasesCreate: "/supplies/medications/purchases/create",
 

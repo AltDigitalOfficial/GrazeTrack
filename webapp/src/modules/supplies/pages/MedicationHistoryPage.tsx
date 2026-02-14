@@ -39,13 +39,22 @@ function calculateUnitPrice(totalPrice: string | null, quantity: string): string
   return `$${unit.toFixed(2)}`;
 }
 
+function getErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message.trim()) return err.message;
+  return fallback;
+}
+
+type MedicationHistoryLocationState = {
+  medicationDisplayName?: string | null;
+};
+
 export default function MedicationHistoryPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { standardMedicationId } = useParams();
   const { activeRanchId, loading: ranchLoading } = useRanch();
 
-  const medicationDisplayName = (location.state as any)?.medicationDisplayName as string | undefined;
+  const medicationDisplayName = (location.state as MedicationHistoryLocationState | null)?.medicationDisplayName ?? undefined;
 
   const [purchases, setPurchases] = useState<PurchaseRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -67,8 +76,8 @@ export default function MedicationHistoryPage() {
           `/medication-purchases?standardMedicationId=${encodeURIComponent(standardMedicationId)}`
         );
         setPurchases(res.purchases ?? []);
-      } catch (e: any) {
-        setError(e?.message || "Failed to load medication history");
+      } catch (err: unknown) {
+        setError(getErrorMessage(err, "Failed to load medication history"));
         setPurchases([]);
       } finally {
         setLoading(false);
@@ -151,7 +160,10 @@ export default function MedicationHistoryPage() {
                         size="sm"
                         onClick={() =>
                           navigate(
-                            `/supplies/medications/purchases/${encodeURIComponent(p.id)}`
+                            ROUTES.supplies.medicationsPurchaseDetail.replace(
+                              ":purchaseId",
+                              encodeURIComponent(p.id)
+                            )
                           )
                         }
                       >

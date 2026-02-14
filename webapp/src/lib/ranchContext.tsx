@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { getMe, type MeResponse } from "@/lib/api";
@@ -21,17 +21,17 @@ export function RanchProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const syncLocalStorage = (ranchId: string | null) => {
+  const syncLocalStorage = useCallback((ranchId: string | null) => {
     if (ranchId) localStorage.setItem("currentRanchId", ranchId);
     else localStorage.removeItem("currentRanchId");
-  };
+  }, []);
 
-  const setActiveRanchId = (ranchId: string | null) => {
+  const setActiveRanchId = useCallback((ranchId: string | null) => {
     setActiveRanchIdState(ranchId);
     syncLocalStorage(ranchId);
-  };
+  }, [syncLocalStorage]);
 
-  const refreshMe = async () => {
+  const refreshMe = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -42,16 +42,16 @@ export function RanchProvider({ children }: { children: React.ReactNode }) {
       const ranchId = profile.activeRanchId ?? null;
       setActiveRanchIdState(ranchId);
       syncLocalStorage(ranchId);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setMe(null);
       setActiveRanchIdState(null);
       syncLocalStorage(null);
-
-      setError(err?.message || "Failed to load profile.");
+      const message = err instanceof Error && err.message.trim() ? err.message : "Failed to load profile.";
+      setError(message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [syncLocalStorage]);
 
   useEffect(() => {
     // One-shot auth listener for the whole app
@@ -68,12 +68,11 @@ export function RanchProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Logged in: load /me
-      refreshMe();
+      void refreshMe();
     });
 
     return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshMe, syncLocalStorage]);
 
   const value = useMemo<RanchContextValue>(
     () => ({
@@ -84,7 +83,7 @@ export function RanchProvider({ children }: { children: React.ReactNode }) {
       refreshMe,
       setActiveRanchId,
     }),
-    [me, activeRanchId, loading, error]
+    [me, activeRanchId, loading, error, refreshMe, setActiveRanchId]
   );
 
   return <RanchContext.Provider value={value}>{children}</RanchContext.Provider>;

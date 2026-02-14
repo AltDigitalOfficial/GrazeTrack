@@ -13,7 +13,7 @@ import { apiGet, apiPut } from "@/lib/api";
 import { ROUTES } from "@/routes";
 
 // Fix Leaflet default marker paths
-delete (L.Icon.Default.prototype as any)._getIconUrl;
+delete (L.Icon.Default.prototype as L.Icon.Default & { _getIconUrl?: unknown })._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
@@ -297,8 +297,9 @@ export default function EditZonePage() {
           setPoints([]);
           removePolygonFromMapOnly();
         }
-      } catch (err: any) {
-        setErrorMsg(err?.message || "Failed to load zone");
+      } catch (err: unknown) {
+        const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load zone";
+        setErrorMsg(msg);
       } finally {
         setLoading(false);
       }
@@ -376,8 +377,9 @@ export default function EditZonePage() {
       if (!res?.success) throw new Error("Update zone failed");
 
       navigate(ROUTES.land.zonesList);
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Failed to update zone");
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to update zone";
+      setErrorMsg(msg);
     } finally {
       setSaving(false);
     }

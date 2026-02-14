@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 
 import { apiGet, apiPostJson, apiPutJson } from "@/lib/api";
 import { ROUTES } from "@/routes";
+import { HerdBreedsResponseSchema } from "@/lib/contracts/herds";
 
 import { getBreedsForSpecies, type AnimalSpecies } from "@/components/lookups/animalLookups";
 
@@ -17,6 +18,18 @@ type HerdPayload = {
   longDescription?: string;
 };
 
+type EditLocationState = {
+  herdId?: string;
+} | null;
+
+type HerdDetailResponse = {
+  name?: string | null;
+  shortDescription?: string | null;
+  species?: string | null;
+  breed?: string | null;
+  longDescription?: string | null;
+};
+
 // Minimal shape needed for Herd Create
 type RanchSettingsDTO = {
   species?: Array<{
@@ -26,10 +39,6 @@ type RanchSettingsDTO = {
 
 type SpeciesOption = { value: string; label: string };
 
-type HerdBreedsResponse = {
-  breeds: string[];
-};
-
 const MIXED_VALUE = "Mixed";
 const OTHER_VALUE = "Other"; // Breed only
 
@@ -37,7 +46,7 @@ export default function CreateHerdPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const herdId = (location.state as any)?.herdId as string | undefined;
+  const herdId = (location.state as EditLocationState)?.herdId;
   const isEdit = Boolean(herdId);
 
   const [name, setName] = useState("");
@@ -106,13 +115,14 @@ export default function CreateHerdPage() {
         opts.push({ value: MIXED_VALUE, label: "Mixed" });
 
         setSpeciesOptions(opts);
-      } catch (e: any) {
+      } catch (err: unknown) {
         if (cancelled) return;
 
         // If we can't load ranch settings, block create rather than guessing.
         setSpeciesOptions([]);
         setRanchHasNoSpecies(true);
-        setErrorMsg(e?.message || "Failed to load ranch settings (species)");
+        const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load ranch settings (species)";
+        setErrorMsg(msg);
       } finally {
         if (!cancelled) setLoadingRanchSettings(false);
       }
@@ -134,7 +144,7 @@ export default function CreateHerdPage() {
       setErrorMsg(null);
 
       try {
-        const data = await apiGet<any>(`/herds/${herdId}`);
+        const data = await apiGet<HerdDetailResponse>(`/herds/${herdId}`);
         if (cancelled) return;
 
         setName(data?.name ?? "");
@@ -154,8 +164,11 @@ export default function CreateHerdPage() {
           setBreedMode(loadedBreed);
           setOtherBreedText("");
         }
-      } catch (e: any) {
-        if (!cancelled) setErrorMsg(e?.message || "Failed to load herd");
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load herd";
+          setErrorMsg(msg);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -181,7 +194,8 @@ export default function CreateHerdPage() {
       setLoadingRanchBreeds(true);
       try {
         const qs = new URLSearchParams({ species }).toString();
-        const resp = await apiGet<HerdBreedsResponse>(`/herds/breeds?${qs}`);
+        const respRaw = await apiGet(`/herds/breeds?${qs}`);
+        const resp = HerdBreedsResponseSchema.parse(respRaw);
         if (cancelled) return;
 
         const raw = Array.isArray(resp?.breeds) ? resp.breeds : [];
@@ -339,8 +353,9 @@ export default function CreateHerdPage() {
       setTimeout(() => {
         navigate(ROUTES.herd.list, { replace: true });
       }, 250);
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Failed to save herd");
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to save herd";
+      setErrorMsg(msg);
     } finally {
       setLoading(false);
     }

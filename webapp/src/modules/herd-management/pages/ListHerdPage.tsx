@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MoreHorizontal } from "lucide-react";
 
@@ -131,23 +131,24 @@ export default function ListHerdPage() {
     }
   };
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setErrorMsg(null);
 
     try {
       await Promise.all([loadHerds(), loadRanchSettings()]);
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Failed to load herds");
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load herds";
+      setErrorMsg(msg);
       setHerds([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadAll();
-  }, []);
+  }, [loadAll]);
 
   const openDeleteDialog = (herd: HerdListItem) => {
     setHerdToDelete(herd);
@@ -176,8 +177,9 @@ export default function ListHerdPage() {
       await apiDelete<{ success: true }>(`/herds/${herdToDelete.id}`);
       closeDeleteDialog();
       await loadAll();
-    } catch (err: any) {
-      setErrorMsg(err?.message || "Failed to delete herd");
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to delete herd";
+      setErrorMsg(msg);
       closeDeleteDialog();
     } finally {
       setLoading(false);

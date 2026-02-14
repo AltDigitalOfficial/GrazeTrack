@@ -1,3 +1,5 @@
+import { ROUTES } from "@/routes";
+
 export default function LandManagementPage() {
   return (
     <div className="p-6 space-y-6">
@@ -16,7 +18,7 @@ export default function LandManagementPage() {
 
         {/* Define Zones */}
         <a
-          href="/land-management/zones"
+          href={ROUTES.land.zonesList}
           className="block p-5 border border-stone-300 rounded-lg shadow-sm bg-white hover:shadow-md transition"
         >
           <h2 className="text-xl font-semibold text-stone-800">Define Zones</h2>

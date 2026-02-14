@@ -5,16 +5,9 @@ import { EllipsisVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiGet, apiDelete } from "@/lib/api";
 import { ROUTES } from "@/routes";
+import { ZonesListResponseSchema, type ZoneListItem } from "@/lib/contracts/zones";
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-
-type ZoneListItem = {
-  id: string;
-  name: string;
-  description: string | null;
-  areaAcres: string | null;
-  createdAt: string;
-};
 
 function formatArea(areaAcres: string | null): string {
   if (!areaAcres) return "—";
@@ -40,10 +33,12 @@ export default function ListZonesPage() {
     setErrorMsg(null);
 
     try {
-      const data = await apiGet<ZoneListItem[]>("/zones");
-      setZones(Array.isArray(data) ? data : []);
-    } catch (e: any) {
-      setErrorMsg(e?.message || "Failed to load zones");
+      const dataRaw = await apiGet("/zones");
+      const data = ZonesListResponseSchema.parse(dataRaw);
+      setZones(data);
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load zones";
+      setErrorMsg(msg);
       setZones([]);
     } finally {
       setLoading(false);
@@ -63,8 +58,9 @@ export default function ListZonesPage() {
       const res: { success: boolean } = await apiDelete(`/zones/${zone.id}`);
       if (!res.success) throw new Error("Failed to delete zone");
       await load();
-    } catch (e: any) {
-      alert(e?.message || "Failed to delete zone");
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to delete zone";
+      alert(msg);
     }
   };
 

@@ -6,6 +6,7 @@ import { v4 as uuid } from "uuid";
 import { db } from "../db";
 import { animalHerdMembership, animals, herds, userRanches } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
+import { logAndSendInternalError, sendError } from "../lib/http";
 
 const MIXED_VALUE = "Mixed";
 const OTHER_VALUE = "Other";
@@ -145,13 +146,47 @@ const herdUpdateSchema = herdCreateSchema.partial();
 
 export async function herdRoutes(app: FastifyInstance) {
   /**
+   * LIST distinct breeds for a species in the active ranch
+   */
+  app.get("/herds/breeds", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const ranchId = await getActiveRanchId(req.auth!.userId);
+      if (!ranchId) return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
+
+      const query = z
+        .object({
+          species: z.string().trim().min(1),
+        })
+        .safeParse(req.query ?? {});
+
+      if (!query.success) {
+        return sendError(reply, 400, "INVALID_QUERY", "Invalid query", query.error.flatten());
+      }
+
+      const species = query.data.species;
+      const rows = await db
+        .select({ breed: herds.breed })
+        .from(herds)
+        .where(and(eq(herds.ranchId, ranchId), eq(herds.species, species)));
+
+      const uniqueBreeds = Array.from(
+        new Set(rows.map((r) => (r.breed ?? "").trim()).filter((v) => v.length > 0 && v !== MIXED_VALUE))
+      ).sort((a, b) => a.localeCompare(b));
+
+      return reply.send({ breeds: uniqueBreeds });
+    } catch (err) {
+      return logAndSendInternalError(req, reply, err, "LIST_HERD_BREEDS_FAILED", "Failed to list herd breeds");
+    }
+  });
+
+  /**
    * LIST herds (includes counts)
    */
   app.get("/herds", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) {
-        return reply.status(400).send({ error: "No ranch selected" });
+        return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
       }
 
       const countsByHerdId = await getCountsByHerdId(ranchId);
@@ -178,8 +213,7 @@ export async function herdRoutes(app: FastifyInstance) {
 
       return reply.send(withCounts);
     } catch (err) {
-      req.log.error({ err }, "Failed to list herds");
-      return reply.status(500).send({ error: "Failed to list herds" });
+      return logAndSendInternalError(req, reply, err, "LIST_HERDS_FAILED", "Failed to list herds");
     }
   });
 
@@ -190,7 +224,7 @@ export async function herdRoutes(app: FastifyInstance) {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) {
-        return reply.status(400).send({ error: "No ranch selected" });
+        return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
       }
 
       const herdId = (req.params as any).id as string;
@@ -212,7 +246,7 @@ export async function herdRoutes(app: FastifyInstance) {
 
       const herd = rows[0];
       if (!herd) {
-        return reply.status(404).send({ error: "Herd not found" });
+        return sendError(reply, 404, "HERD_NOT_FOUND", "Herd not found");
       }
 
       // Build counts map and pluck this herd
@@ -221,8 +255,7 @@ export async function herdRoutes(app: FastifyInstance) {
 
       return reply.send({ ...herd, counts });
     } catch (err) {
-      req.log.error({ err }, "Failed to get herd");
-      return reply.status(500).send({ error: "Failed to get herd" });
+      return logAndSendInternalError(req, reply, err, "GET_HERD_FAILED", "Failed to get herd");
     }
   });
 
@@ -233,15 +266,12 @@ export async function herdRoutes(app: FastifyInstance) {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) {
-        return reply.status(400).send({ error: "No ranch selected" });
+        return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
       }
 
       const parsed = herdCreateSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
-        return reply.status(400).send({
-          error: "Invalid herd payload",
-          details: parsed.error.flatten(),
-        });
+        return sendError(reply, 400, "INVALID_HERD_PAYLOAD", "Invalid herd payload", parsed.error.flatten());
       }
 
       const data = parsed.data;
@@ -262,8 +292,7 @@ export async function herdRoutes(app: FastifyInstance) {
 
       return reply.status(201).send({ id: herdId });
     } catch (err) {
-      req.log.error({ err }, "Failed to create herd");
-      return reply.status(500).send({ error: "Failed to create herd" });
+      return logAndSendInternalError(req, reply, err, "CREATE_HERD_FAILED", "Failed to create herd");
     }
   });
 
@@ -274,17 +303,14 @@ export async function herdRoutes(app: FastifyInstance) {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) {
-        return reply.status(400).send({ error: "No ranch selected" });
+        return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
       }
 
       const herdId = (req.params as any).id as string;
 
       const parsed = herdUpdateSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
-        return reply.status(400).send({
-          error: "Invalid herd payload",
-          details: parsed.error.flatten(),
-        });
+        return sendError(reply, 400, "INVALID_HERD_PAYLOAD", "Invalid herd payload", parsed.error.flatten());
       }
 
       const data = parsed.data;
@@ -306,8 +332,7 @@ export async function herdRoutes(app: FastifyInstance) {
 
       return reply.send({ success: true });
     } catch (err) {
-      req.log.error({ err }, "Failed to update herd");
-      return reply.status(500).send({ error: "Failed to update herd" });
+      return logAndSendInternalError(req, reply, err, "UPDATE_HERD_FAILED", "Failed to update herd");
     }
   });
 
@@ -318,7 +343,7 @@ export async function herdRoutes(app: FastifyInstance) {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) {
-        return reply.status(400).send({ error: "No ranch selected" });
+        return sendError(reply, 400, "NO_RANCH_SELECTED", "No ranch selected");
       }
 
       const herdId = (req.params as any).id as string;
@@ -327,8 +352,7 @@ export async function herdRoutes(app: FastifyInstance) {
 
       return reply.send({ success: true });
     } catch (err) {
-      req.log.error({ err }, "Failed to delete herd");
-      return reply.status(500).send({ error: "Failed to delete herd" });
+      return logAndSendInternalError(req, reply, err, "DELETE_HERD_FAILED", "Failed to delete herd");
     }
   });
 }

@@ -19,17 +19,23 @@ import { useToast } from "@/components/ui/use-toast";
 
 import { apiPost, apiPostForm } from "@/lib/api";
 import {
+  ExistingInventoryIntakePayloadSchema,
+  ExistingInventoryIntakeResponseSchema,
+  type ExistingInventoryIntakePayload,
+} from "@/lib/contracts/animals";
+import {
   ANIMAL_SPECIES,
   getBreedsForSpecies,
   type AnimalSpecies,
 } from "@/components/lookups/animalLookups";
 
-// ---- Adjust these endpoints to match your backend routes ----
-const EXISTING_INVENTORY_INTAKE_ENDPOINT = "/api/animal-intake/existing-inventory";
+// ---- Endpoint contracts ----
+const EXISTING_INVENTORY_INTAKE_ENDPOINT = "/animal-intake/existing-inventory";
 
 // Assumed upload endpoints (typical REST shape):
-const ANIMAL_PHOTOS_UPLOAD_ENDPOINT = (animalId: string) => `/api/animals/${animalId}/photos`;
-const ANIMAL_DOCUMENTS_UPLOAD_ENDPOINT = (animalId: string) => `/api/animals/${animalId}/documents`;
+// NOTE: backend upload handlers for these routes are not implemented yet.
+const ANIMAL_PHOTOS_UPLOAD_ENDPOINT = (animalId: string) => `/animals/${animalId}/photos`;
+const ANIMAL_DOCUMENTS_UPLOAD_ENDPOINT = (animalId: string) => `/animals/${animalId}/documents`;
 
 // ---- Lookups for media categories ----
 type PhotoCategory = "profile" | "side" | "tag" | "group" | "misc";
@@ -160,11 +166,6 @@ function fileListToArray(list: FileList | null): File[] {
   return Array.from(list);
 }
 
-type CreatedAnimalResponse = {
-  animalId?: string;
-  animal?: { id?: string };
-};
-
 export default function AnimalIntakeExistingInventoryPage() {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -241,7 +242,7 @@ export default function AnimalIntakeExistingInventoryPage() {
 
     try {
       // 1) Create animal via intake endpoint
-      const payload = {
+      const payload: ExistingInventoryIntakePayload = {
         // NEW: nickname included
         nickname: values.nickname?.trim() ? values.nickname.trim() : null,
 
@@ -262,9 +263,11 @@ export default function AnimalIntakeExistingInventoryPage() {
         notes: values.notes?.trim() ? values.notes.trim() : null,
       };
 
-      const created = (await apiPost(EXISTING_INVENTORY_INTAKE_ENDPOINT, payload)) as CreatedAnimalResponse;
+      const validatedPayload = ExistingInventoryIntakePayloadSchema.parse(payload);
+      const createdRaw = await apiPost(EXISTING_INVENTORY_INTAKE_ENDPOINT, validatedPayload);
+      const created = ExistingInventoryIntakeResponseSchema.parse(createdRaw);
 
-      const animalId = created?.animalId ?? created?.animal?.id;
+      const animalId = created.animalId;
       if (!animalId) {
         // This is the only “hard dependency” for uploads.
         toast({
@@ -319,7 +322,7 @@ export default function AnimalIntakeExistingInventoryPage() {
         el?.focus();
       }, 0);
     } catch (err: unknown) {
-      const e = err as any;
+      const e = err as { message?: string; response?: { data?: { message?: string } } };
       const message =
         e?.message ||
         e?.response?.data?.message ||

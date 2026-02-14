@@ -1,8 +1,14 @@
 import path from "path";
 import fs from "fs/promises";
+import fsSync from "fs";
 import { v4 as uuid } from "uuid";
 
-const BASE_DIR = "c:/AltDigital/allcode/grazetrack-platform/images";
+const cwdImagesRoot = path.resolve(process.cwd(), "images");
+const parentImagesRoot = path.resolve(process.cwd(), "..", "images");
+const defaultImagesRoot = fsSync.existsSync(cwdImagesRoot)
+  ? cwdImagesRoot
+  : parentImagesRoot;
+const BASE_DIR = process.env.IMAGES_ROOT || defaultImagesRoot;
 
 export async function ensureRanchStructure(ranchId) {
   const ranchRoot = path.join(BASE_DIR, "ranches", ranchId);

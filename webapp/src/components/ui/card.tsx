@@ -2,10 +2,15 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+type CardProps = React.HTMLAttributes<HTMLDivElement> & {
+  title?: string
+  description?: string
+}
+
 const Card = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+  CardProps
+>(({ className, title, description, children, ...props }, ref) => (
   <div
     ref={ref}
     className={cn(
@@ -13,7 +18,17 @@ const Card = React.forwardRef<
       className
     )}
     {...props}
-  />
+  >
+    {title ? (
+      <div className="mb-3 space-y-1">
+        <div className="font-semibold leading-none tracking-tight">{title}</div>
+        {description ? (
+          <div className="text-sm text-muted-foreground">{description}</div>
+        ) : null}
+      </div>
+    ) : null}
+    {children}
+  </div>
 ))
 Card.displayName = "Card"
 

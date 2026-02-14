@@ -239,9 +239,12 @@ export default function RanchSettingsPage() {
         setSameAsPhysical(physical.length > 3 && physical === mailing);
 
         setSaveSuccess(false);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Error loading ranch:", err);
-        if (alive) setErrorMsg(err?.message || "Failed to load ranch.");
+        if (alive) {
+          const msg = err instanceof Error && err.message.trim() ? err.message : "Failed to load ranch.";
+          setErrorMsg(msg);
+        }
       } finally {
         if (alive) setLoadingRanch(false);
       }
@@ -252,7 +255,6 @@ export default function RanchSettingsPage() {
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRanchId]);
 
   useEffect(() => {
@@ -301,11 +303,13 @@ export default function RanchSettingsPage() {
         });
 
         setSpeciesPanels(panels);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Error loading ranch settings:", err);
         if (alive) {
           // Don't block the page; show a friendly message only if ranch exists.
-          setErrorMsg(err?.message || "Failed to load ranch species/age bands.");
+          const msg =
+            err instanceof Error && err.message.trim() ? err.message : "Failed to load ranch species/age bands.";
+          setErrorMsg(msg);
         }
       } finally {
         if (alive) setLoadingRanchSettings(false);
@@ -317,7 +321,6 @@ export default function RanchSettingsPage() {
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRanchId]);
 
   const handleSameAsPhysical = (checked: boolean) => {
@@ -509,10 +512,11 @@ export default function RanchSettingsPage() {
           age_bands: ageBandsPayload,
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Save failed:", err);
       setSaveSuccess(false);
-      setErrorMsg(err?.message || "Save failed.");
+      const msg = err instanceof Error && err.message.trim() ? err.message : "Save failed.";
+      setErrorMsg(msg);
     } finally {
       setSaving(false);
     }
@@ -941,7 +945,7 @@ updateSpeciesPanel(i, {
                   panel.age_bands
                     .slice()
                     .sort((a, b) => a.sort_order - b.sort_order)
-                    .map((band, j) => (
+                    .map((band) => (
                       <div key={band.id ?? band.client_id} className="grid grid-cols-12 gap-2 px-3 py-2 border-b last:border-b-0">
                         <div className="col-span-2">
                           <Input
