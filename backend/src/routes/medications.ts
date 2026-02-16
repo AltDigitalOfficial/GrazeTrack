@@ -42,6 +42,26 @@ function todayIsoDate(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function decimalInputSchema() {
+  return z
+    .union([z.string(), z.number()])
+    .transform((v) => String(v).trim())
+    .refine((v) => v.length > 0, "Value is required")
+    .refine((v) => Number.isFinite(Number(v)), "Must be a number")
+    .refine((v) => Number(v) > 0, "Must be greater than 0");
+}
+
+function toNullableDecimalString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const s = String(value).trim();
+  if (!s.length) return null;
+  return s;
+}
+
+function formatDoseText(amount: string, unit: string, perAmount: string, perUnit: string): string {
+  return `${amount} ${unit} per ${perAmount} ${perUnit}`;
+}
+
 function canonicalUnitFromFormat(format: string): string {
   switch ((format || "").toLowerCase()) {
     case "pill":
@@ -132,6 +152,14 @@ function normalizeBody(raw: Record<string, any>): Record<string, any> {
     }
   }
 
+  if (typeof out.applicableSpecies === "string") {
+    try {
+      out.applicableSpecies = JSON.parse(out.applicableSpecies);
+    } catch {
+      // leave as-is so validation returns a clear error
+    }
+  }
+
   return out;
 }
 
@@ -150,12 +178,38 @@ const CreateStandardMedicationBody = z.object({
   brandName: z.string().min(1),
 
   onLabelDoseText: z.string().optional().nullable(),
+  applicableSpecies: z.array(z.string().min(1)).optional(),
+  onLabelDoseAmount: decimalInputSchema().optional().nullable(),
+  onLabelDoseUnit: z.string().optional().nullable(),
+  onLabelPerAmount: decimalInputSchema().optional().nullable(),
+  onLabelPerUnit: z.string().optional().nullable(),
 
   standard: z.object({
     usesOffLabel: z.union([z.boolean(), z.string()]).transform((v) => v === true || v === "true"),
-    standardDoseText: z.string().min(1),
+    standardDoseText: z.string().optional().nullable(),
+    standardDoseAmount: decimalInputSchema(),
+    standardDoseUnit: z.string().min(1),
+    standardPerAmount: decimalInputSchema(),
+    standardPerUnit: z.string().min(1),
     startDate: z.string().min(10).optional(),
   }),
+}).superRefine((data, ctx) => {
+  const onLabelParts = [
+    data.onLabelDoseAmount,
+    data.onLabelDoseUnit,
+    data.onLabelPerAmount,
+    data.onLabelPerUnit,
+  ];
+  const hasAnyOnLabel = onLabelParts.some((v) => v != null && String(v).trim().length > 0);
+  const hasAllOnLabel = onLabelParts.every((v) => v != null && String(v).trim().length > 0);
+
+  if (hasAnyOnLabel && !hasAllOnLabel) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "On-label structured dosing requires amount/unit and per-amount/per-unit.",
+      path: ["onLabelDoseAmount"],
+    });
+  }
 });
 
 const ListStandardsQuery = z.object({
@@ -196,6 +250,26 @@ export async function medicationsRoutes(app: FastifyInstance) {
 
       const now = new Date();
       const startDate = data.standard.startDate ?? todayIsoDate();
+      const standardDoseText =
+        data.standard.standardDoseText && data.standard.standardDoseText.trim().length > 0
+          ? data.standard.standardDoseText.trim()
+          : formatDoseText(
+              data.standard.standardDoseAmount,
+              data.standard.standardDoseUnit,
+              data.standard.standardPerAmount,
+              data.standard.standardPerUnit
+            );
+      const onLabelDoseText =
+        data.onLabelDoseText && data.onLabelDoseText.trim().length > 0
+          ? data.onLabelDoseText.trim()
+          : data.onLabelDoseAmount && data.onLabelDoseUnit && data.onLabelPerAmount && data.onLabelPerUnit
+            ? formatDoseText(
+                String(data.onLabelDoseAmount),
+                String(data.onLabelDoseUnit),
+                String(data.onLabelPerAmount),
+                String(data.onLabelPerUnit)
+              )
+            : null;
 
       await db.transaction(async (tx) => {
         await tx.insert(standardMedications).values({
@@ -210,7 +284,12 @@ export async function medicationsRoutes(app: FastifyInstance) {
           concentrationUnit: data.concentrationUnit ?? null,
           manufacturerName: data.manufacturerName,
           brandName: data.brandName,
-          onLabelDoseText: data.onLabelDoseText ?? null,
+          onLabelDoseText,
+          applicableSpecies: data.applicableSpecies ?? [],
+          onLabelDoseAmount: toNullableDecimalString(data.onLabelDoseAmount),
+          onLabelDoseUnit: data.onLabelDoseUnit ?? null,
+          onLabelPerAmount: toNullableDecimalString(data.onLabelPerAmount),
+          onLabelPerUnit: data.onLabelPerUnit ?? null,
           createdAt: now,
         });
 
@@ -219,7 +298,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
           ranchId,
           standardMedicationId: medicationId,
           usesOffLabel: data.standard.usesOffLabel,
-          standardDoseText: data.standard.standardDoseText,
+          standardDoseText,
+          standardDoseAmount: String(data.standard.standardDoseAmount),
+          standardDoseUnit: data.standard.standardDoseUnit,
+          standardPerAmount: String(data.standard.standardPerAmount),
+          standardPerUnit: data.standard.standardPerUnit,
           startDate,
           endDate: null,
           createdAt: now,
@@ -268,7 +351,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
           currentStandard: {
             id: standardId,
             usesOffLabel: data.standard.usesOffLabel,
-            standardDoseText: data.standard.standardDoseText,
+            standardDoseText,
+            standardDoseAmount: String(data.standard.standardDoseAmount),
+            standardDoseUnit: data.standard.standardDoseUnit,
+            standardPerAmount: String(data.standard.standardPerAmount),
+            standardPerUnit: data.standard.standardPerUnit,
             startDate,
             endDate: null,
           },
@@ -295,10 +382,19 @@ export async function medicationsRoutes(app: FastifyInstance) {
           manufacturerName: standardMedications.manufacturerName,
           brandName: standardMedications.brandName,
           onLabelDoseText: standardMedications.onLabelDoseText,
+          onLabelDoseAmount: standardMedications.onLabelDoseAmount,
+          onLabelDoseUnit: standardMedications.onLabelDoseUnit,
+          onLabelPerAmount: standardMedications.onLabelPerAmount,
+          onLabelPerUnit: standardMedications.onLabelPerUnit,
+          applicableSpecies: standardMedications.applicableSpecies,
 
           standardId: ranchMedicationStandards.id,
           usesOffLabel: ranchMedicationStandards.usesOffLabel,
           standardDoseText: ranchMedicationStandards.standardDoseText,
+          standardDoseAmount: ranchMedicationStandards.standardDoseAmount,
+          standardDoseUnit: ranchMedicationStandards.standardDoseUnit,
+          standardPerAmount: ranchMedicationStandards.standardPerAmount,
+          standardPerUnit: ranchMedicationStandards.standardPerUnit,
           startDate: ranchMedicationStandards.startDate,
           endDate: ranchMedicationStandards.endDate,
         })
@@ -324,6 +420,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
           manufacturerName: r.manufacturerName,
           brandName: r.brandName,
           onLabelDoseText: r.onLabelDoseText,
+          onLabelDoseAmount: r.onLabelDoseAmount,
+          onLabelDoseUnit: r.onLabelDoseUnit,
+          onLabelPerAmount: r.onLabelPerAmount,
+          onLabelPerUnit: r.onLabelPerUnit,
+          applicableSpecies: r.applicableSpecies,
           displayName: buildDisplayName({
             chemicalName: r.chemicalName,
             brandName: r.brandName,
@@ -336,6 +437,10 @@ export async function medicationsRoutes(app: FastifyInstance) {
             id: r.standardId,
             usesOffLabel: r.usesOffLabel,
             standardDoseText: r.standardDoseText,
+            standardDoseAmount: r.standardDoseAmount,
+            standardDoseUnit: r.standardDoseUnit,
+            standardPerAmount: r.standardPerAmount,
+            standardPerUnit: r.standardPerUnit,
             startDate: r.startDate,
             endDate: r.endDate,
           },
@@ -478,6 +583,10 @@ export async function medicationsRoutes(app: FastifyInstance) {
           standardMedicationId: ranchMedicationStandards.standardMedicationId,
           usesOffLabel: ranchMedicationStandards.usesOffLabel,
           standardDoseText: ranchMedicationStandards.standardDoseText,
+          standardDoseAmount: ranchMedicationStandards.standardDoseAmount,
+          standardDoseUnit: ranchMedicationStandards.standardDoseUnit,
+          standardPerAmount: ranchMedicationStandards.standardPerAmount,
+          standardPerUnit: ranchMedicationStandards.standardPerUnit,
           startDate: ranchMedicationStandards.startDate,
           endDate: ranchMedicationStandards.endDate,
           createdAt: ranchMedicationStandards.createdAt,
@@ -485,6 +594,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
           format: standardMedications.format,
           concentrationValue: standardMedications.concentrationValue,
           concentrationUnit: standardMedications.concentrationUnit,
+          applicableSpecies: standardMedications.applicableSpecies,
           manufacturerName: standardMedications.manufacturerName,
           brandName: standardMedications.brandName,
         })
@@ -513,6 +623,13 @@ export async function medicationsRoutes(app: FastifyInstance) {
           }),
           usesOffLabel: r.usesOffLabel,
           standardDoseText: r.standardDoseText,
+          standardDoseAmount: r.standardDoseAmount,
+          standardDoseUnit: r.standardDoseUnit,
+          standardPerAmount: r.standardPerAmount,
+          standardPerUnit: r.standardPerUnit,
+          concentrationValue: r.concentrationValue,
+          concentrationUnit: r.concentrationUnit,
+          applicableSpecies: r.applicableSpecies,
           startDate: r.startDate,
           endDate: r.endDate,
           createdAt: r.createdAt,

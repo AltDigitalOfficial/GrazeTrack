@@ -149,7 +149,7 @@ export default function MedicationsPage() {
       <Card title="Medication Inventory">
         <div className="space-y-3">
           <p className="text-stone-600">
-            Inventory is derived from purchases. Units are canonical per medication (derived from the medication format).
+            Inventory totals come from purchase records. Units are set automatically based on medication format.
           </p>
 
           {inventoryError && <div className="text-sm text-red-600">Error: {inventoryError}</div>}
@@ -210,8 +210,7 @@ export default function MedicationsPage() {
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <p className="text-stone-600">
-              Standards power the medication dropdown for purchases. Retired standards won’t appear
-              in purchase selection.
+              Standards control the medication list shown during purchase entry. Older standards are hidden from new purchases.
             </p>
 
             <div className="flex items-center gap-2">

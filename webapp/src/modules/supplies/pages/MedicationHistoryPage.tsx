@@ -95,7 +95,7 @@ export default function MedicationHistoryPage() {
         <div>
           <h1 className="text-2xl font-semibold text-stone-800">{title}</h1>
           <p className="text-sm text-stone-600 mt-1">
-            Purchases are append-only. (Later we’ll show use/treatment events here too.)
+            Purchase records are kept as entered. (Later we’ll show use/treatment events here too.)
           </p>
         </div>
 

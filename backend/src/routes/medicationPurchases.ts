@@ -45,6 +45,26 @@ function normalizeName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function decimalInputSchema() {
+  return z
+    .union([z.string(), z.number()])
+    .transform((v) => String(v).trim())
+    .refine((v) => v.length > 0, "Value is required")
+    .refine((v) => Number.isFinite(Number(v)), "Must be a number")
+    .refine((v) => Number(v) > 0, "Must be greater than 0");
+}
+
+function toNullableDecimalString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const s = String(value).trim();
+  if (!s.length) return null;
+  return s;
+}
+
+function formatDoseText(amount: string, unit: string, perAmount: string, perUnit: string): string {
+  return `${amount} ${unit} per ${perAmount} ${perUnit}`;
+}
+
 async function parseMultipartRequest(req: any): Promise<{
   body: Record<string, any>;
   files: any[];
@@ -118,9 +138,18 @@ const CreatePurchaseBody = z.object({
         manufacturerName: z.string().min(1),
         brandName: z.string().min(1),
         onLabelDoseText: z.string().optional().nullable(),
+        applicableSpecies: z.array(z.string().min(1)).optional(),
+        onLabelDoseAmount: decimalInputSchema().optional().nullable(),
+        onLabelDoseUnit: z.string().optional().nullable(),
+        onLabelPerAmount: decimalInputSchema().optional().nullable(),
+        onLabelPerUnit: z.string().optional().nullable(),
         standard: z.object({
           usesOffLabel: z.union([z.boolean(), z.string()]).transform((v) => v === true || v === "true"),
-          standardDoseText: z.string().min(1),
+          standardDoseText: z.string().optional().nullable(),
+          standardDoseAmount: decimalInputSchema(),
+          standardDoseUnit: z.string().min(1),
+          standardPerAmount: decimalInputSchema(),
+          standardPerUnit: z.string().min(1),
           startDate: z.string().min(10).optional(),
         }),
       }),
@@ -318,6 +347,29 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
         const medId = crypto.randomUUID();
         const standardId = crypto.randomUUID();
         const startDate = newMed.standard.startDate ?? todayIsoDate();
+        const standardDoseText =
+          newMed.standard.standardDoseText && newMed.standard.standardDoseText.trim().length > 0
+            ? newMed.standard.standardDoseText.trim()
+            : formatDoseText(
+                newMed.standard.standardDoseAmount,
+                newMed.standard.standardDoseUnit,
+                newMed.standard.standardPerAmount,
+                newMed.standard.standardPerUnit
+              );
+        const onLabelDoseText =
+          newMed.onLabelDoseText && newMed.onLabelDoseText.trim().length > 0
+            ? newMed.onLabelDoseText.trim()
+            : newMed.onLabelDoseAmount &&
+                newMed.onLabelDoseUnit &&
+                newMed.onLabelPerAmount &&
+                newMed.onLabelPerUnit
+              ? formatDoseText(
+                  String(newMed.onLabelDoseAmount),
+                  String(newMed.onLabelDoseUnit),
+                  String(newMed.onLabelPerAmount),
+                  String(newMed.onLabelPerUnit)
+                )
+              : null;
 
         await db.transaction(async (tx) => {
           await tx.insert(standardMedications).values({
@@ -332,7 +384,12 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
             concentrationUnit: newMed.concentrationUnit ?? null,
             manufacturerName: newMed.manufacturerName,
             brandName: newMed.brandName,
-            onLabelDoseText: newMed.onLabelDoseText ?? null,
+            onLabelDoseText,
+            applicableSpecies: newMed.applicableSpecies ?? [],
+            onLabelDoseAmount: toNullableDecimalString(newMed.onLabelDoseAmount),
+            onLabelDoseUnit: newMed.onLabelDoseUnit ?? null,
+            onLabelPerAmount: toNullableDecimalString(newMed.onLabelPerAmount),
+            onLabelPerUnit: newMed.onLabelPerUnit ?? null,
             createdAt: now,
           });
 
@@ -341,7 +398,11 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
             ranchId,
             standardMedicationId: medId,
             usesOffLabel: newMed.standard.usesOffLabel,
-            standardDoseText: newMed.standard.standardDoseText,
+            standardDoseText,
+            standardDoseAmount: String(newMed.standard.standardDoseAmount),
+            standardDoseUnit: newMed.standard.standardDoseUnit,
+            standardPerAmount: String(newMed.standard.standardPerAmount),
+            standardPerUnit: newMed.standard.standardPerUnit,
             startDate,
             endDate: null,
             createdAt: now,

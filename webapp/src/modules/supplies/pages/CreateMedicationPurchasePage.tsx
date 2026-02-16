@@ -68,6 +68,8 @@ const concentrationUnitOptions = [
   "other",
 ] as const;
 
+const dosingPerUnitOptions = ["animal", "lb", "kg"] as const;
+
 const FormSchema = z.object({
   standardMedicationId: z.string().optional(),
   quantity: z.string().min(1, "Quantity is required"),
@@ -84,12 +86,52 @@ const FormSchema = z.object({
   manufacturerName: z.string().optional(),
   brandName: z.string().optional(),
   onLabelDoseText: z.string().optional(),
+  onLabelDoseAmount: z.string().optional(),
+  onLabelDoseUnit: z.string().optional(),
+  onLabelPerAmount: z.string().optional(),
+  onLabelPerUnit: z.string().optional(),
   usesOffLabel: z.boolean().optional(),
-  standardDoseText: z.string().optional(),
+  standardDoseAmount: z.string().optional(),
+  standardDoseUnit: z.string().optional(),
+  standardPerAmount: z.string().optional(),
+  standardPerUnit: z.string().optional(),
   standardStartDate: z.string().optional(),
 });
 
 type FormValues = z.input<typeof FormSchema>;
+
+type CreateNewMedicationPayload = {
+  chemicalName: string;
+  format: string;
+  concentrationValue: string | null;
+  concentrationUnit: string | null;
+  manufacturerName: string;
+  brandName: string;
+  onLabelDoseText: string | null;
+  onLabelDoseAmount: string | null;
+  onLabelDoseUnit: string | null;
+  onLabelPerAmount: string | null;
+  onLabelPerUnit: string | null;
+  applicableSpecies: string[];
+  standard: {
+    usesOffLabel: boolean;
+    standardDoseText: string;
+    standardDoseAmount: string;
+    standardDoseUnit: string;
+    standardPerAmount: string;
+    standardPerUnit: string;
+    startDate: string;
+  };
+};
+
+type CreatePurchasePayload = {
+  quantity: string;
+  purchaseDate: string;
+  totalPrice: string | null;
+  supplierName: string;
+  standardMedicationId?: string;
+  createNewMedication?: CreateNewMedicationPayload;
+};
 
 function todayIsoDate(): string {
   const d = new Date();
@@ -103,6 +145,10 @@ function isNumberString(v: string): boolean {
   const trimmed = v.trim();
   if (trimmed.length === 0) return false;
   return /^(\d+)(\.\d+)?$/.test(trimmed);
+}
+
+function buildDoseText(amount: string, unit: string, perAmount: string, perUnit: string): string {
+  return `${amount} ${unit} per ${perAmount} ${perUnit}`;
 }
 
 function buildNewMedPreview(v: Partial<FormValues>) {
@@ -408,8 +454,15 @@ export default function CreateMedicationPurchasePage() {
       manufacturerName: "Generic",
       brandName: "Generic",
       onLabelDoseText: "",
+      onLabelDoseAmount: "",
+      onLabelDoseUnit: "mL",
+      onLabelPerAmount: "",
+      onLabelPerUnit: "lb",
       usesOffLabel: false,
-      standardDoseText: "",
+      standardDoseAmount: "",
+      standardDoseUnit: "mL",
+      standardPerAmount: "",
+      standardPerUnit: "lb",
       standardStartDate: todayIsoDate(),
     },
     mode: "onBlur",
@@ -575,7 +628,10 @@ export default function CreateMedicationPurchasePage() {
         ["format", "Format is required"],
         ["manufacturerName", "Manufacturer is required"],
         ["brandName", "Brand is required"],
-        ["standardDoseText", "Ranch standard dosing is required"],
+        ["standardDoseAmount", "Dose amount is required"],
+        ["standardDoseUnit", "Dose unit is required"],
+        ["standardPerAmount", "Per amount is required"],
+        ["standardPerUnit", "Per unit is required"],
         ["standardStartDate", "Start date is required"],
       ];
 
@@ -586,10 +642,27 @@ export default function CreateMedicationPurchasePage() {
           return;
         }
       }
+
+      if (!isNumberString(parsed.standardDoseAmount!)) {
+        form.setError("standardDoseAmount", { type: "validate", message: "Enter a positive number" });
+        return;
+      }
+      if (!isNumberString(parsed.standardPerAmount!)) {
+        form.setError("standardPerAmount", { type: "validate", message: "Enter a positive number" });
+        return;
+      }
+      if (Number(parsed.standardDoseAmount) <= 0) {
+        form.setError("standardDoseAmount", { type: "validate", message: "Enter a number greater than 0" });
+        return;
+      }
+      if (Number(parsed.standardPerAmount) <= 0) {
+        form.setError("standardPerAmount", { type: "validate", message: "Enter a number greater than 0" });
+        return;
+      }
     }
 
     // Base payload fields (weâ€™ll use these for both JSON and multipart)
-    const basePayload: Record<string, unknown> = {
+    const basePayload: CreatePurchasePayload = {
       quantity: parsed.quantity.trim(),
       purchaseDate: parsed.purchaseDate,
       totalPrice: parsed.totalPrice && parsed.totalPrice.trim().length > 0 ? parsed.totalPrice.trim() : null,
@@ -608,6 +681,52 @@ export default function CreateMedicationPurchasePage() {
         concentrationValue && parsed.concentrationUnit && parsed.concentrationUnit.trim().length > 0
           ? parsed.concentrationUnit.trim()
           : null;
+      const hasAnyOnLabelMath =
+        String(parsed.onLabelDoseAmount ?? "").trim().length > 0 ||
+        String(parsed.onLabelDoseUnit ?? "").trim().length > 0 ||
+        String(parsed.onLabelPerAmount ?? "").trim().length > 0 ||
+        String(parsed.onLabelPerUnit ?? "").trim().length > 0;
+      const hasAllOnLabelMath =
+        String(parsed.onLabelDoseAmount ?? "").trim().length > 0 &&
+        String(parsed.onLabelDoseUnit ?? "").trim().length > 0 &&
+        String(parsed.onLabelPerAmount ?? "").trim().length > 0 &&
+        String(parsed.onLabelPerUnit ?? "").trim().length > 0;
+
+      if (hasAnyOnLabelMath && !hasAllOnLabelMath) {
+        form.setError("onLabelDoseAmount", {
+          type: "validate",
+          message: "Complete all on-label math fields, or leave all blank.",
+        });
+        return;
+      }
+      if (hasAllOnLabelMath) {
+        if (!isNumberString(parsed.onLabelDoseAmount!) || Number(parsed.onLabelDoseAmount) <= 0) {
+          form.setError("onLabelDoseAmount", { type: "validate", message: "Enter a number greater than 0" });
+          return;
+        }
+        if (!isNumberString(parsed.onLabelPerAmount!) || Number(parsed.onLabelPerAmount) <= 0) {
+          form.setError("onLabelPerAmount", { type: "validate", message: "Enter a number greater than 0" });
+          return;
+        }
+      }
+
+      const onLabelDoseText =
+        parsed.onLabelDoseText && parsed.onLabelDoseText.trim().length > 0
+          ? parsed.onLabelDoseText.trim()
+          : hasAllOnLabelMath
+            ? buildDoseText(
+                parsed.onLabelDoseAmount!.trim(),
+                parsed.onLabelDoseUnit!.trim(),
+                parsed.onLabelPerAmount!.trim(),
+                parsed.onLabelPerUnit!.trim()
+              )
+            : null;
+      const standardDoseText = buildDoseText(
+        parsed.standardDoseAmount!.trim(),
+        parsed.standardDoseUnit!.trim(),
+        parsed.standardPerAmount!.trim(),
+        parsed.standardPerUnit!.trim()
+      );
 
       basePayload.createNewMedication = {
         chemicalName: parsed.chemicalName!.trim(),
@@ -616,13 +735,19 @@ export default function CreateMedicationPurchasePage() {
         concentrationUnit,
         manufacturerName: parsed.manufacturerName!.trim(),
         brandName: parsed.brandName!.trim(),
-        onLabelDoseText:
-          parsed.onLabelDoseText && parsed.onLabelDoseText.trim().length > 0
-            ? parsed.onLabelDoseText.trim()
-            : null,
+        onLabelDoseText,
+        onLabelDoseAmount: hasAllOnLabelMath ? parsed.onLabelDoseAmount!.trim() : null,
+        onLabelDoseUnit: hasAllOnLabelMath ? parsed.onLabelDoseUnit!.trim() : null,
+        onLabelPerAmount: hasAllOnLabelMath ? parsed.onLabelPerAmount!.trim() : null,
+        onLabelPerUnit: hasAllOnLabelMath ? parsed.onLabelPerUnit!.trim() : null,
+        applicableSpecies: [],
         standard: {
           usesOffLabel: Boolean(parsed.usesOffLabel),
-          standardDoseText: parsed.standardDoseText!.trim(),
+          standardDoseText,
+          standardDoseAmount: parsed.standardDoseAmount!.trim(),
+          standardDoseUnit: parsed.standardDoseUnit!.trim(),
+          standardPerAmount: parsed.standardPerAmount!.trim(),
+          standardPerUnit: parsed.standardPerUnit!.trim(),
           startDate: parsed.standardStartDate!,
         },
       };
@@ -681,7 +806,7 @@ export default function CreateMedicationPurchasePage() {
         <div>
           <h1 className="text-2xl font-semibold">Record Medication Purchase</h1>
           <p className="text-sm text-muted-foreground">
-            Add an append-only purchase record. Inventory updates automatically.
+            Record a purchase. Inventory updates automatically.
           </p>
         </div>
 
@@ -763,7 +888,7 @@ export default function CreateMedicationPurchasePage() {
                   )}
 
                   <p className="text-xs text-muted-foreground">
-                    Only active standards appear here. Retired standards wonâ€™t show.
+                    Only current standards appear here. Older standards are hidden.
                   </p>
                 </>
               )}
@@ -797,7 +922,7 @@ export default function CreateMedicationPurchasePage() {
               <Label htmlFor="supplierName">Supplier</Label>
               <Input
                 id="supplierName"
-                placeholder="Walmart, Valley Vet, Local Co-opâ€¦"
+                placeholder="Walmart, Valley Vet, Local Co-op, etc."
                 {...form.register("supplierName")}
                 disabled={!canInteract}
               />
@@ -805,7 +930,7 @@ export default function CreateMedicationPurchasePage() {
                 <p className="text-sm text-red-600">{form.formState.errors.supplierName.message}</p>
               )}
               <p className="text-xs text-muted-foreground">
-                Supplier will be upserted for spend reporting later.
+                We will save this supplier name so you can track spend by supplier later.
               </p>
             </div>
           </CardContent>
@@ -907,6 +1032,41 @@ export default function CreateMedicationPurchasePage() {
                     <Label htmlFor="onLabelDoseText">On-label dosing (optional)</Label>
                     <Textarea id="onLabelDoseText" rows={4} {...form.register("onLabelDoseText")} disabled={!canInteract} />
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="onLabelDoseAmount">On-label dose amount (optional)</Label>
+                    <Input id="onLabelDoseAmount" {...form.register("onLabelDoseAmount")} disabled={!canInteract} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="onLabelDoseUnit">On-label dose unit (optional)</Label>
+                    <Input id="onLabelDoseUnit" {...form.register("onLabelDoseUnit")} disabled={!canInteract} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="onLabelPerAmount">On-label per amount (optional)</Label>
+                    <Input id="onLabelPerAmount" {...form.register("onLabelPerAmount")} disabled={!canInteract} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="onLabelPerUnit">On-label per unit (optional)</Label>
+                    <Select
+                      value={form.watch("onLabelPerUnit") || "lb"}
+                      onValueChange={(value) => form.setValue("onLabelPerUnit", value)}
+                      disabled={!canInteract}
+                    >
+                      <SelectTrigger id="onLabelPerUnit" aria-label="On-label per unit" title="On-label per unit">
+                        <SelectValue placeholder="Select per unit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {dosingPerUnitOptions.map((opt) => (
+                          <SelectItem key={opt} value={opt}>
+                            {opt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -933,9 +1093,62 @@ export default function CreateMedicationPurchasePage() {
                   </div>
                 </div>
 
+                <div className="space-y-2">
+                  <Label htmlFor="standardDoseAmount">Dose amount</Label>
+                  <Input id="standardDoseAmount" {...form.register("standardDoseAmount")} disabled={!canInteract} />
+                  {form.formState.errors.standardDoseAmount?.message && (
+                    <p className="text-sm text-red-600">{form.formState.errors.standardDoseAmount.message}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="standardDoseUnit">Dose unit</Label>
+                  <Input
+                    id="standardDoseUnit"
+                    {...form.register("standardDoseUnit")}
+                    placeholder={form.watch("concentrationUnit") || "mL"}
+                    disabled={!canInteract}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="standardPerAmount">Per amount</Label>
+                  <Input id="standardPerAmount" {...form.register("standardPerAmount")} disabled={!canInteract} />
+                  {form.formState.errors.standardPerAmount?.message && (
+                    <p className="text-sm text-red-600">{form.formState.errors.standardPerAmount.message}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="standardPerUnit">Per unit</Label>
+                  <Select
+                    value={form.watch("standardPerUnit") || "lb"}
+                    onValueChange={(value) => form.setValue("standardPerUnit", value)}
+                    disabled={!canInteract}
+                  >
+                    <SelectTrigger id="standardPerUnit" aria-label="Per unit" title="Per unit">
+                      <SelectValue placeholder="Select per unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dosingPerUnitOptions.map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="standardDoseText">Ranch standard dosing</Label>
-                  <Textarea id="standardDoseText" rows={5} {...form.register("standardDoseText")} disabled={!canInteract} />
+                  <Label>Derived standard</Label>
+                  <div className="rounded-md border px-3 py-2 text-sm text-stone-700 bg-stone-50">
+                    {buildDoseText(
+                      form.watch("standardDoseAmount") || "0",
+                      form.watch("standardDoseUnit") || (form.watch("concentrationUnit") || "unit"),
+                      form.watch("standardPerAmount") || "0",
+                      form.watch("standardPerUnit") || "animal"
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
