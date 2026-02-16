@@ -100,6 +100,39 @@ const FormSchema = z.object({
 
 type FormValues = z.input<typeof FormSchema>;
 
+type CreateNewMedicationPayload = {
+  chemicalName: string;
+  format: string;
+  concentrationValue: string | null;
+  concentrationUnit: string | null;
+  manufacturerName: string;
+  brandName: string;
+  onLabelDoseText: string | null;
+  onLabelDoseAmount: string | null;
+  onLabelDoseUnit: string | null;
+  onLabelPerAmount: string | null;
+  onLabelPerUnit: string | null;
+  applicableSpecies: string[];
+  standard: {
+    usesOffLabel: boolean;
+    standardDoseText: string;
+    standardDoseAmount: string;
+    standardDoseUnit: string;
+    standardPerAmount: string;
+    standardPerUnit: string;
+    startDate: string;
+  };
+};
+
+type CreatePurchasePayload = {
+  quantity: string;
+  purchaseDate: string;
+  totalPrice: string | null;
+  supplierName: string;
+  standardMedicationId?: string;
+  createNewMedication?: CreateNewMedicationPayload;
+};
+
 function todayIsoDate(): string {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -629,7 +662,7 @@ export default function CreateMedicationPurchasePage() {
     }
 
     // Base payload fields (weâ€™ll use these for both JSON and multipart)
-    const basePayload: Record<string, unknown> = {
+    const basePayload: CreatePurchasePayload = {
       quantity: parsed.quantity.trim(),
       purchaseDate: parsed.purchaseDate,
       totalPrice: parsed.totalPrice && parsed.totalPrice.trim().length > 0 ? parsed.totalPrice.trim() : null,
