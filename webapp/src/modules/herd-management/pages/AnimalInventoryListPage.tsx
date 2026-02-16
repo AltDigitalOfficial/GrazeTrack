@@ -1,4 +1,4 @@
-// webapp/src/modules/herd-management/pages/AnimalInventoryListPage.tsx
+﻿// webapp/src/modules/herd-management/pages/AnimalInventoryListPage.tsx
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -9,6 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -50,7 +57,7 @@ function normalize(s: string) {
 }
 
 function TagPill({ tagNumber, tagColor }: { tagNumber: string | null; tagColor: string | null }) {
-  if (!tagNumber) return <span className="text-muted-foreground">—</span>;
+  if (!tagNumber) return <span className="text-muted-foreground">â€”</span>;
 
   const base = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
   
@@ -58,7 +65,7 @@ function TagPill({ tagNumber, tagColor }: { tagNumber: string | null; tagColor: 
 }
 
 function StatusPill({ status }: { status: string | null }) {
-  if (!status) return <span className="text-muted-foreground">—</span>;
+  if (!status) return <span className="text-muted-foreground">â€”</span>;
 
   const base = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
 
@@ -85,8 +92,8 @@ type SelectedDam = {
 function makeDamDisplay(a: AnimalRow) {
   // Keep it simple & consistent: Tag + optional nickname later.
   const tag = a.tagNumber ? a.tagNumber : "No tag";
-  const breed = a.breed ? ` • ${a.breed}` : "";
-  const herd = a.herdName ? ` • ${a.herdName}` : a.herdId ? ` • ${a.herdId}` : "";
+  const breed = a.breed ? ` â€¢ ${a.breed}` : "";
+  const herd = a.herdName ? ` â€¢ ${a.herdName}` : a.herdId ? ` â€¢ ${a.herdId}` : "";
   return `${tag}${breed}${herd}`;
 }
 
@@ -123,7 +130,7 @@ export default function AnimalInventoryListPage() {
     setError(null);
 
     try {
-      // ✅ Correct API route (apiGet prefixes "/api")
+      // âœ… Correct API route (apiGet prefixes "/api")
       const res = await apiGet<AnimalsResponse>("/animals");
       setRows(res.animals ?? []);
     } catch (err: unknown) {
@@ -161,7 +168,7 @@ export default function AnimalInventoryListPage() {
       if (r.sex !== "female") return false;
       if (r.neutered) return false;
       if (!r.species) return false;
-      // optionally only "active" — leaving open for now
+      // optionally only "active" â€” leaving open for now
       return true;
     });
   }, [rows]);
@@ -312,36 +319,36 @@ export default function AnimalInventoryListPage() {
 
           <div>
             <div className="text-sm font-medium">Species</div>
-            <select
-              className="mt-1 w-full rounded-md border px-2 py-1 text-sm"
-              value={speciesFilter}
-              onChange={(e) => setSpeciesFilter(e.target.value)}
-              aria-label="Species"
-            >
-              <option value="all">All</option>
-              {speciesOptions.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+            <Select value={speciesFilter} onValueChange={setSpeciesFilter} aria-label="Species">
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="All" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {speciesOptions.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
             <div className="text-sm font-medium">Status</div>
-            <select
-              className="mt-1 w-full rounded-md border px-2 py-1 text-sm"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              aria-label="Status"
-            >
-              <option value="all">All</option>
-              {statusOptions.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+            <Select value={statusFilter} onValueChange={setStatusFilter} aria-label="Status">
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="All" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {statusOptions.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {error ? <div className="col-span-full text-sm text-red-600">{error}</div> : null}
@@ -353,7 +360,7 @@ export default function AnimalInventoryListPage() {
           <CardTitle className="text-base">
             Animals <span className="text-muted-foreground font-normal">({filtered.length})</span>
           </CardTitle>
-          {loading ? <div className="text-sm text-muted-foreground">Loading…</div> : null}
+          {loading ? <div className="text-sm text-muted-foreground">Loadingâ€¦</div> : null}
         </CardHeader>
 
         <CardContent className="overflow-x-auto">
@@ -376,9 +383,9 @@ export default function AnimalInventoryListPage() {
                   <td className="py-2 font-medium">
                     <TagPill tagNumber={a.tagNumber} tagColor={a.tagColor} />
                   </td>
-                  <td className="py-2">{a.species ?? "—"}</td>
-                  <td className="py-2">{a.breed ?? "—"}</td>
-                  <td className="py-2">{a.sex ?? "—"}</td>
+                  <td className="py-2">{a.species ?? "â€”"}</td>
+                  <td className="py-2">{a.breed ?? "â€”"}</td>
+                  <td className="py-2">{a.sex ?? "â€”"}</td>
                   <td className="py-2">
                     <StatusPill status={a.status} />
                   </td>
@@ -435,7 +442,7 @@ export default function AnimalInventoryListPage() {
                       aria-label="Just gave birth"
                     />
                     <span className="text-sm text-muted-foreground">
-                      When checked, we’ll record a productivity row for each selected dam.
+                      When checked, weâ€™ll record a productivity row for each selected dam.
                     </span>
                   </div>
                 </div>
@@ -452,24 +459,28 @@ export default function AnimalInventoryListPage() {
 
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Total babies</div>
-                  <select
-                    className="mt-1 w-full rounded-md border px-2 py-2 text-sm"
-                    value={birthTotalBabies}
-                    onChange={(e) => setBirthTotalBabies(Number(e.target.value))}
+                  <Select
+                    value={String(birthTotalBabies)}
+                    onValueChange={(value) => setBirthTotalBabies(Number(value))}
                     aria-label="Total babies"
                   >
-                    {Array.from({ length: 100 }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="1" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 100 }, (_, i) => i + 1).map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="md:col-span-3">
                   <div className="text-sm text-muted-foreground">
                     Selected species:{" "}
-                    <span className="font-medium text-foreground">{birthLockedSpecies ?? "— (select a dam to lock)"}</span>
+                    <span className="font-medium text-foreground">{birthLockedSpecies ?? "â€” (select a dam to lock)"}</span>
                     {birthLockedSpecies ? (
                       <span className="ml-2 text-xs text-muted-foreground">
                         (Clear all dams to change species)
@@ -485,7 +496,7 @@ export default function AnimalInventoryListPage() {
                 <CardTitle className="text-base">
                   Select dams{" "}
                   <span className="text-muted-foreground font-normal">
-                    (female • not neutered • species locked)
+                    (female â€¢ not neutered â€¢ species locked)
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -528,7 +539,7 @@ export default function AnimalInventoryListPage() {
                               <div className="font-medium">{r.tagNumber ?? "No tag"}</div>
                               <div className="text-xs text-muted-foreground">{makeDamDisplay(r)}</div>
                             </td>
-                            <td className="py-2 px-3">{r.species ?? "—"}</td>
+                            <td className="py-2 px-3">{r.species ?? "â€”"}</td>
                             <td className="py-2 px-3">{r.neutered ? "Yes" : "No"}</td>
                           </tr>
                         );
@@ -569,7 +580,7 @@ export default function AnimalInventoryListPage() {
               Cancel
             </Button>
             <Button onClick={onConfirmBirthModal} disabled={Boolean(birthFormError) || birthSaving}>
-              {birthSaving ? "Continuing…" : "Confirm"}
+              {birthSaving ? "Continuingâ€¦" : "Confirm"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -577,3 +588,4 @@ export default function AnimalInventoryListPage() {
     </div>
   );
 }
+

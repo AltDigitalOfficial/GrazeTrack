@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css";
 import { MapPin } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { AlertBanner } from "@/components/ui/alert-banner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -111,6 +112,7 @@ export default function EditZonePage() {
   const isDrawingRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
+  const [mapReady, setMapReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -197,13 +199,15 @@ export default function EditZonePage() {
     [drawPolygon]
   );
 
-  // Init map once
+  // Init map once the map container has rendered (after loading state clears).
   useEffect(() => {
+    if (loading) return;
     if (!mapElRef.current) return;
     if (mapRef.current) return;
 
     const map = L.map(mapElRef.current).setView([39.8283, -98.5795], 5);
     mapRef.current = map;
+    setMapReady(true);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution:
@@ -214,8 +218,9 @@ export default function EditZonePage() {
       map.remove();
       mapRef.current = null;
       polygonRef.current = null;
+      setMapReady(false);
     };
-  }, []);
+  }, [loading]);
 
   // Bind click handler
   useEffect(() => {
@@ -307,6 +312,18 @@ export default function EditZonePage() {
 
     void load();
   }, [id, drawPolygon, removePolygonFromMapOnly]);
+
+  // Keep map visuals in sync once the map is available.
+  useEffect(() => {
+    if (!mapReady) return;
+
+    if (points.length < 3) {
+      removePolygonFromMapOnly();
+      return;
+    }
+
+    drawPolygon(points, !isDrawing);
+  }, [mapReady, points, isDrawing, drawPolygon, removePolygonFromMapOnly]);
 
   /**
    * "Hide Boundary" – removes polygon from the MAP only.
@@ -414,16 +431,12 @@ export default function EditZonePage() {
         </Button>
       </div>
 
-      {errorMsg && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800 text-sm">
-          {errorMsg}
-        </div>
-      )}
+      {errorMsg && <AlertBanner variant="error">{errorMsg}</AlertBanner>}
 
       {isDrawing && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-blue-800 text-sm">
+        <AlertBanner variant="info">
           <strong>Drawing Mode:</strong> Click on the map to add points. Map navigation is disabled.
-        </div>
+        </AlertBanner>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">

@@ -5,6 +5,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { ROUTES } from "@/routes";
 import { useRanch } from "@/lib/ranchContext";
+import { Button } from "@/components/ui/button";
 
 export function Sidebar() {
   const location = useLocation();
@@ -329,13 +330,13 @@ export function Sidebar() {
 
       {/* Absolutely positioned logout button - always at bottom of sidebar */}
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-stone-700 border-t border-stone-600">
-        <button
+        <Button
           type="button"
           onClick={handleLogout}
           className="w-full rounded px-3 py-2 text-sm font-semibold bg-stone-600 hover:bg-stone-500 text-stone-100"
         >
           Logout
-        </button>
+        </Button>
       </div>
     </aside>
   );

@@ -1,4 +1,8 @@
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 interface PastureSaveModalProps {
   isOpen: boolean;
@@ -35,10 +39,10 @@ export default function PastureSaveModal({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-brown-800 font-medium mb-1">
+            <Label className="block text-brown-800 font-medium mb-1">
               Pasture Name
-            </label>
-            <input
+            </Label>
+            <Input
               type="text"
               required
               value={name}
@@ -49,10 +53,10 @@ export default function PastureSaveModal({
           </div>
 
           <div>
-            <label className="block text-brown-800 font-medium mb-1">
+            <Label className="block text-brown-800 font-medium mb-1">
               Notes
-            </label>
-            <textarea
+            </Label>
+            <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="w-full border border-brown-400 rounded px-3 py-2 h-24 resize-none focus:outline-none focus:ring-2 focus:ring-green-700"
@@ -61,20 +65,20 @@ export default function PastureSaveModal({
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
-            <button
+            <Button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded bg-brown-200 text-brown-800 hover:bg-brown-300 transition"
+              className="px-4 py-2 rounded bg-brown-200 text-brown-800 hover:bg-brown-300 transition border border-brown-300"
             >
               Cancel
-            </button>
+            </Button>
 
-            <button
+            <Button
               type="submit"
               className="px-4 py-2 rounded bg-green-700 text-white hover:bg-green-800 transition"
             >
               Save Pasture
-            </button>
+            </Button>
           </div>
         </form>
       </div>

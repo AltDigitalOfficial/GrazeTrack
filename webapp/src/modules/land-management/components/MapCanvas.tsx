@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { MapContainer, TileLayer, Polygon, useMapEvents } from "react-leaflet";
 import type { LatLngExpression } from "leaflet";
+import { Button } from "@/components/ui/button";
 
 interface MapCanvasProps {
   points: [number, number][];
@@ -56,12 +57,12 @@ export default function MapCanvas({ points, onPointsUpdated }: MapCanvasProps) {
       </MapContainer>
 
       <div className="absolute top-4 left-4 flex gap-2">
-        <button
+        <Button
           onClick={resetPolygon}
-          className="px-3 py-1 rounded bg-brown-700 text-white text-sm shadow hover:bg-brown-800 transition"
+          className="px-3 py-1 h-auto rounded bg-brown-700 text-white text-sm shadow hover:bg-brown-800 transition"
         >
           Reset
-        </button>
+        </Button>
 
         {points.length > 2 && (
           <div className="px-3 py-1 rounded bg-green-700 text-white text-sm shadow">

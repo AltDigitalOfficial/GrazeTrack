@@ -26,4 +26,25 @@ export default defineConfig([
       'react-refresh/only-export-components': 'off',
     },
   },
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/components/ui/input.tsx', 'src/components/ui/textarea.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXOpeningElement[name.name="select"]',
+          message: 'Use shared Select components from @/components/ui/select.',
+        },
+        {
+          selector: 'JSXOpeningElement[name.name="input"]',
+          message: 'Use shared Input component from @/components/ui/input.',
+        },
+        {
+          selector: 'JSXOpeningElement[name.name="textarea"]',
+          message: 'Use shared Textarea component from @/components/ui/textarea.',
+        },
+      ],
+    },
+  },
 ])

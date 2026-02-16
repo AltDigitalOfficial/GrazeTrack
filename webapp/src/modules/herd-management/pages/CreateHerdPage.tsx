@@ -1,8 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { AlertBanner } from "@/components/ui/alert-banner";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 import { apiGet, apiPostJson, apiPutJson } from "@/lib/api";
 import { ROUTES } from "@/routes";
@@ -320,7 +330,7 @@ export default function CreateHerdPage() {
     if (name.trim().length === 0) return false;
 
     // Block creating a herd if ranch has no species configured.
-    // For edit: allow save even if settings are empty (don’t brick legacy edits).
+    // For edit: allow save even if settings are empty (donâ€™t brick legacy edits).
     if (!isEdit && ranchHasNoSpecies) return false;
 
     return true;
@@ -370,21 +380,13 @@ export default function CreateHerdPage() {
         </Button>
       </div>
 
-      {banner && (
-        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-green-800 text-sm">
-          {banner}
-        </div>
-      )}
+      {banner && <AlertBanner variant="success">{banner}</AlertBanner>}
 
-      {errorMsg && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800 text-sm">
-          {errorMsg}
-        </div>
-      )}
+      {errorMsg && <AlertBanner variant="error">{errorMsg}</AlertBanner>}
 
       {!isEdit && ranchHasNoSpecies && !loadingRanchSettings && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm space-y-2">
-          <div className="font-medium">You can’t create herds yet.</div>
+        <AlertBanner variant="warning" className="space-y-2">
+          <div className="font-medium">You canâ€™t create herds yet.</div>
           <div>
             Before creating herds, add at least one species in Ranch Settings so we know what animals you
             raise on this ranch.
@@ -394,14 +396,12 @@ export default function CreateHerdPage() {
               Go to Ranch Settings
             </Button>
           </div>
-        </div>
+        </AlertBanner>
       )}
 
       <section className="space-y-4 border p-6 rounded-lg bg-white">
         <div className="space-y-2">
-          <label htmlFor="name" className="text-sm font-medium">
-            Herd Name
-          </label>
+          <Label htmlFor="name">Herd Name</Label>
           <Input
             id="name"
             value={name}
@@ -412,9 +412,7 @@ export default function CreateHerdPage() {
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="shortDescription" className="text-sm font-medium">
-            Short Description (optional)
-          </label>
+          <Label htmlFor="shortDescription">Short Description (optional)</Label>
           <Input
             id="shortDescription"
             value={shortDescription}
@@ -426,23 +424,23 @@ export default function CreateHerdPage() {
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <label htmlFor="species" className="text-sm font-medium">
-              Species
-            </label>
-            <select
-              id="species"
-              className="w-full border rounded-md px-3 py-2 text-sm bg-white h-10"
+            <Label htmlFor="species">Species</Label>
+            <Select
               value={species}
-              onChange={(e) => setSpecies(e.target.value)}
+              onValueChange={setSpecies}
               disabled={loading || loadingRanchSettings || (!isEdit && ranchHasNoSpecies)}
             >
-              <option value="">{loadingRanchSettings ? "Loading species…" : "Select species…"}</option>
-              {speciesOptions.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="species">
+                <SelectValue placeholder={loadingRanchSettings ? "Loading species…" : "Select species…"} />
+              </SelectTrigger>
+              <SelectContent>
+                {speciesOptions.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
             <div className="text-xs text-muted-foreground">
               Need another species? Add it in Ranch Settings.
@@ -450,14 +448,10 @@ export default function CreateHerdPage() {
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="breed" className="text-sm font-medium">
-              Breed
-            </label>
-            <select
-              id="breed"
-              className="w-full h-10 rounded-md border px-3 bg-white text-sm"
+            <Label htmlFor="breed">Breed</Label>
+            <Select
               value={breedMode}
-              onChange={(e) => setBreedMode(e.target.value)}
+              onValueChange={setBreedMode}
               disabled={
                 loading ||
                 loadingRanchSettings ||
@@ -465,52 +459,50 @@ export default function CreateHerdPage() {
                 (!isEdit && ranchHasNoSpecies)
               }
             >
-              <option value="">
-                {isMixedSpecies
-                  ? "Breed disabled for Mixed herds"
-                  : species
-                  ? loadingRanchBreeds
-                    ? "Loading breeds…"
-                    : "Select breed…"
-                  : "Select species first…"}
-              </option>
-
-              {/* Ranch-entered breeds (DB-sourced) at the top */}
-              {!isMixedSpecies &&
-                ranchBreedOptions.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-
-              {/* Special options */}
-              {!isMixedSpecies && (
-                <>
-                  <option value={MIXED_VALUE}>Mixed</option>
-                  <option value={OTHER_VALUE}>Other</option>
-                </>
-              )}
-
-              {/* Lookup breeds (deduped against ranch-entered breeds) */}
-              {!isMixedSpecies &&
-                dedupedLookupBreedOptions.map((b) => (
-                  <option key={b.value} value={b.value}>
-                    {b.label}
-                  </option>
-                ))}
-            </select>
+              <SelectTrigger id="breed">
+                <SelectValue
+                  placeholder={
+                    isMixedSpecies
+                      ? "Breed disabled for Mixed herds"
+                      : species
+                      ? loadingRanchBreeds
+                        ? "Loading breeds…"
+                        : "Select breed…"
+                      : "Select species first…"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {!isMixedSpecies &&
+                  ranchBreedOptions.map((b) => (
+                    <SelectItem key={b} value={b}>
+                      {b}
+                    </SelectItem>
+                  ))}
+                {!isMixedSpecies && (
+                  <>
+                    <SelectItem value={MIXED_VALUE}>Mixed</SelectItem>
+                    <SelectItem value={OTHER_VALUE}>Other</SelectItem>
+                  </>
+                )}
+                {!isMixedSpecies &&
+                  dedupedLookupBreedOptions.map((b) => (
+                    <SelectItem key={b.value} value={b.value}>
+                      {b.label}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
 
             {breedMode === OTHER_VALUE && !isMixedSpecies && (
               <div className="space-y-2 pt-2">
-                <label htmlFor="otherBreed" className="text-sm font-medium">
-                  Breed (Other)
-                </label>
+                <Label htmlFor="otherBreed">Breed (Other)</Label>
                 <Input
                   id="otherBreed"
                   value={otherBreedText}
                   onChange={(e) => setOtherBreedText(e.target.value)}
                   disabled={loading || (!isEdit && ranchHasNoSpecies)}
-                  placeholder="Enter breed…"
+                  placeholder="Enter breedâ€¦"
                 />
               </div>
             )}
@@ -518,12 +510,9 @@ export default function CreateHerdPage() {
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="notes" className="text-sm font-medium">
-            Notes
-          </label>
-          <textarea
+          <Label htmlFor="notes">Notes</Label>
+          <Textarea
             id="notes"
-            className="w-full min-h-35 rounded-md border p-3 bg-white"
             value={longDescription}
             onChange={(e) => setLongDescription(e.target.value)}
             disabled={loading || (!isEdit && ranchHasNoSpecies)}
@@ -532,9 +521,11 @@ export default function CreateHerdPage() {
         </div>
 
         <Button className="w-full" onClick={handleSave} disabled={!canSubmit}>
-          {loading ? "Saving…" : isEdit ? "Save Changes" : "Create Herd"}
+          {loading ? "Savingâ€¦" : isEdit ? "Save Changes" : "Create Herd"}
         </Button>
       </section>
     </div>
   );
 }
+
+

@@ -9,6 +9,7 @@ import { ranchRoutes } from "./routes/ranches";
 import { meRoutes } from "./routes/me";
 import { herdRoutes } from "./routes/herds";
 import { zonesRoutes } from "./routes/zones";
+import { landRoutes } from "./routes/land";
 import { medicationsRoutes } from "./routes/medications";
 import { medicationPurchasesRoutes } from "./routes/medicationPurchases";
 import { animalsRoutes } from "./routes/animals";
@@ -44,6 +45,7 @@ async function start() {
   app.register(ranchRoutes, { prefix: "/api" });
   app.register(herdRoutes, { prefix: "/api" });
   app.register(zonesRoutes, { prefix: "/api" });
+  app.register(landRoutes, { prefix: "/api" });
   app.register(medicationsRoutes, { prefix: "/api" });
   app.register(medicationPurchasesRoutes, { prefix: "/api" });
   app.register(animalsRoutes, { prefix: "/api" });

@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css";
 import { MapPin } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { AlertBanner } from "@/components/ui/alert-banner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -291,16 +292,12 @@ export default function CreateZonePage() {
         </Button>
       </div>
 
-      {errorMsg && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800 text-sm">
-          {errorMsg}
-        </div>
-      )}
+      {errorMsg && <AlertBanner variant="error">{errorMsg}</AlertBanner>}
 
       {isDrawing && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-blue-800 text-sm">
+        <AlertBanner variant="info">
           <strong>Drawing Mode:</strong> Click on the map to add points. Map navigation is disabled.
-        </div>
+        </AlertBanner>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">

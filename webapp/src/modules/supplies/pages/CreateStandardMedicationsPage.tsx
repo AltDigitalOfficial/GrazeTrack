@@ -14,6 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const medicationFormatOptions = [
   "pill",
@@ -389,21 +396,22 @@ export default function CreateStandardMedicationsPage() {
 
             <div className="space-y-2">
               <Label htmlFor="formatSelect">Format</Label>
-              <select
-                id="formatSelect"
-                aria-label="Medication format"
-                title="Medication format"
-                className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              <Select
+                value={form.watch("format") || "pill"}
+                onValueChange={(value) => form.setValue("format", value, { shouldValidate: true })}
                 disabled={!canInteract}
-                value={form.getValues("format") || "pill"}
-                onChange={(e) => form.setValue("format", e.target.value, { shouldValidate: true })}
               >
-                {medicationFormatOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="formatSelect" aria-label="Medication format" title="Medication format">
+                  <SelectValue placeholder="Select format" />
+                </SelectTrigger>
+                <SelectContent>
+                  {medicationFormatOptions.map((opt) => (
+                    <SelectItem key={opt} value={opt}>
+                      {opt}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {form.formState.errors.format?.message && (
                 <p className="text-sm text-red-600">{form.formState.errors.format.message}</p>
               )}
@@ -432,21 +440,26 @@ export default function CreateStandardMedicationsPage() {
 
             <div className="space-y-2">
               <Label htmlFor="concentrationUnitSelect">Concentration unit (optional)</Label>
-              <select
-                id="concentrationUnitSelect"
-                aria-label="Concentration unit"
-                title="Concentration unit"
-                className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              <Select
+                value={form.watch("concentrationUnit") || "mg"}
+                onValueChange={(value) => form.setValue("concentrationUnit", value)}
                 disabled={!canInteract}
-                value={form.getValues("concentrationUnit") || "mg"}
-                onChange={(e) => form.setValue("concentrationUnit", e.target.value)}
               >
-                {concentrationUnitOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger
+                  id="concentrationUnitSelect"
+                  aria-label="Concentration unit"
+                  title="Concentration unit"
+                >
+                  <SelectValue placeholder="Select unit" />
+                </SelectTrigger>
+                <SelectContent>
+                  {concentrationUnitOptions.map((opt) => (
+                    <SelectItem key={opt} value={opt}>
+                      {opt}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2 md:col-span-2">

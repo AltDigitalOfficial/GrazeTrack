@@ -3,11 +3,16 @@ import { useNavigate } from "react-router-dom";
 import { EllipsisVertical } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { AlertBanner } from "@/components/ui/alert-banner";
+import {
+  ActionMenu,
+  ActionMenuContent,
+  ActionMenuItem,
+  ActionMenuTrigger,
+} from "@/components/ui/action-menu";
 import { apiGet, apiDelete } from "@/lib/api";
 import { ROUTES } from "@/routes";
 import { ZonesListResponseSchema, type ZoneListItem } from "@/lib/contracts/zones";
-
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
 function formatArea(areaAcres: string | null): string {
   if (!areaAcres) return "—";
@@ -84,11 +89,7 @@ export default function ListZonesPage() {
         </Button>
       </div>
 
-      {errorMsg && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800 text-sm">
-          {errorMsg}
-        </div>
-      )}
+      {errorMsg && <AlertBanner variant="error">{errorMsg}</AlertBanner>}
 
       {loading ? (
         <div className="text-stone-600">Loading zones…</div>
@@ -117,8 +118,8 @@ export default function ListZonesPage() {
               >
                 {/* Kebab menu */}
                 <div className="absolute top-3 right-3 z-30">
-                  <DropdownMenu.Root>
-                    <DropdownMenu.Trigger asChild>
+                  <ActionMenu>
+                    <ActionMenuTrigger asChild>
                       <button
                         type="button"
                         className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-white hover:bg-stone-50"
@@ -126,32 +127,14 @@ export default function ListZonesPage() {
                       >
                         <EllipsisVertical className="h-4 w-4 text-stone-700" />
                       </button>
-                    </DropdownMenu.Trigger>
-
-                    <DropdownMenu.Portal>
-                      <DropdownMenu.Content
-                        align="end"
-                        sideOffset={8}
-                        // Key changes: explicit text color + high z-index + consistent padding/border/bg/shadow
-                        className="z-9999 min-w-36 rounded-md border bg-white p-1 text-sm text-stone-900 shadow-md"
-                      >
-                        <DropdownMenu.Item
-                          onSelect={() => onEdit(zone.id)}
-                          // Key changes: use Radix highlighted state (not only :hover)
-                          className="cursor-pointer select-none rounded px-3 py-2 outline-none text-stone-900 data-highlighted:bg-stone-100 data-highlighted:text-stone-900"
-                        >
-                          Edit
-                        </DropdownMenu.Item>
-
-                        <DropdownMenu.Item
-                          onSelect={() => onDelete(zone)}
-                          className="cursor-pointer select-none rounded px-3 py-2 outline-none text-red-700 data-highlighted:bg-stone-100 data-highlighted:text-red-700"
-                        >
-                          Delete
-                        </DropdownMenu.Item>
-                      </DropdownMenu.Content>
-                    </DropdownMenu.Portal>
-                  </DropdownMenu.Root>
+                    </ActionMenuTrigger>
+                    <ActionMenuContent className="z-[9999] min-w-36">
+                      <ActionMenuItem onSelect={() => onEdit(zone.id)}>Edit</ActionMenuItem>
+                      <ActionMenuItem variant="destructive" onSelect={() => onDelete(zone)}>
+                        Delete
+                      </ActionMenuItem>
+                    </ActionMenuContent>
+                  </ActionMenu>
                 </div>
 
                 {/* Card content */}

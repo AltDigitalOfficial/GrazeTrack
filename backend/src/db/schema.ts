@@ -11,6 +11,7 @@ import {
   index,
   uniqueIndex,
   integer,
+  jsonb,
   uuid as pgUuid,
 } from "drizzle-orm/pg-core";
 
@@ -194,6 +195,208 @@ export const zones = pgTable(
   (t) => ({
     ranchIdx: index("zones_ranch_idx").on(t.ranchId),
     ranchNameIdx: index("zones_ranch_name_idx").on(t.ranchId, t.name),
+  })
+);
+
+/**
+ * Zone Subzones (paddocks / fenced areas inside a zone)
+ */
+export const zoneSubzones = pgTable(
+  "zone_subzones",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    zoneId: pgUuid("zone_id").notNull(),
+
+    name: text("name").notNull(),
+    description: text("description"),
+    status: text("status").notNull().default("active"), // active | resting | inactive
+
+    areaAcres: decimal("area_acres"),
+    geom: geometry("geom"),
+
+    targetRestDays: integer("target_rest_days"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("zone_subzones_ranch_idx").on(t.ranchId),
+    zoneIdx: index("zone_subzones_zone_idx").on(t.zoneId),
+    ranchZoneNameIdx: uniqueIndex("zone_subzones_ranch_zone_name_unique").on(t.ranchId, t.zoneId, t.name),
+  })
+);
+
+/**
+ * Grazing sessions (history by herd and zone/subzone)
+ */
+export const grazingSessions = pgTable(
+  "grazing_sessions",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    zoneId: pgUuid("zone_id").notNull(),
+    subzoneId: pgUuid("subzone_id"),
+
+    herdId: pgUuid("herd_id"),
+    headCount: integer("head_count"),
+    stockDensityAuPerAcre: decimal("stock_density_au_per_acre"),
+
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("grazing_sessions_ranch_idx").on(t.ranchId),
+    zoneIdx: index("grazing_sessions_zone_idx").on(t.zoneId),
+    herdIdx: index("grazing_sessions_herd_idx").on(t.herdId),
+    startedIdx: index("grazing_sessions_started_idx").on(t.startedAt),
+  })
+);
+
+/**
+ * Soil samples
+ */
+export const soilSamples = pgTable(
+  "soil_samples",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    zoneId: pgUuid("zone_id").notNull(),
+    subzoneId: pgUuid("subzone_id"),
+
+    sampledAt: date("sampled_at").notNull(),
+
+    ph: decimal("ph"),
+    organicMatterPct: decimal("organic_matter_pct"),
+    nitrogenPpm: decimal("nitrogen_ppm"),
+    phosphorusPpm: decimal("phosphorus_ppm"),
+    potassiumPpm: decimal("potassium_ppm"),
+    moisturePct: decimal("moisture_pct"),
+
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("soil_samples_ranch_idx").on(t.ranchId),
+    zoneIdx: index("soil_samples_zone_idx").on(t.zoneId),
+    sampledIdx: index("soil_samples_sampled_idx").on(t.sampledAt),
+  })
+);
+
+/**
+ * Forage observations/samples
+ */
+export const forageSamples = pgTable(
+  "forage_samples",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    zoneId: pgUuid("zone_id").notNull(),
+    subzoneId: pgUuid("subzone_id"),
+
+    sampledAt: date("sampled_at").notNull(),
+    speciesObserved: text("species_observed").array(),
+
+    biomassLbPerAcre: decimal("biomass_lb_per_acre"),
+    groundCoverPct: decimal("ground_cover_pct"),
+    avgCanopyInches: decimal("avg_canopy_inches"),
+
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("forage_samples_ranch_idx").on(t.ranchId),
+    zoneIdx: index("forage_samples_zone_idx").on(t.zoneId),
+    sampledIdx: index("forage_samples_sampled_idx").on(t.sampledAt),
+  })
+);
+
+/**
+ * Daily weather snapshot per zone/subzone
+ */
+export const zoneWeatherDaily = pgTable(
+  "zone_weather_daily",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    zoneId: pgUuid("zone_id").notNull(),
+    subzoneId: pgUuid("subzone_id"),
+
+    weatherDate: date("weather_date").notNull(),
+    minTempF: decimal("min_temp_f"),
+    maxTempF: decimal("max_temp_f"),
+    rainInches: decimal("rain_inches"),
+    forecastRainInchesNext3d: decimal("forecast_rain_inches_next_3d"),
+
+    source: text("source"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("zone_weather_daily_ranch_idx").on(t.ranchId),
+    zoneDateIdx: index("zone_weather_daily_zone_date_idx").on(t.zoneId, t.weatherDate),
+    uniqueDailyIdx: uniqueIndex("zone_weather_daily_unique").on(t.ranchId, t.zoneId, t.subzoneId, t.weatherDate),
+  })
+);
+
+/**
+ * Daily computed/entered zone state
+ */
+export const zoneDailyStates = pgTable(
+  "zone_daily_states",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    zoneId: pgUuid("zone_id").notNull(),
+    subzoneId: pgUuid("subzone_id"),
+
+    stateDate: date("state_date").notNull(),
+    restDays: integer("rest_days"),
+    estimatedForageLbPerAcre: decimal("estimated_forage_lb_per_acre"),
+    utilizationPct: decimal("utilization_pct"),
+    moistureStressScore: integer("moisture_stress_score"), // 0..10
+    recoveryStage: text("recovery_stage"), // poor | early | mid | full
+
+    needsRest: boolean("needs_rest"),
+    notes: text("notes"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("zone_daily_states_ranch_idx").on(t.ranchId),
+    zoneDateIdx: index("zone_daily_states_zone_date_idx").on(t.zoneId, t.stateDate),
+    uniqueDailyIdx: uniqueIndex("zone_daily_states_unique").on(t.ranchId, t.zoneId, t.subzoneId, t.stateDate),
+  })
+);
+
+/**
+ * Actionable recommendations for land and grazing operations
+ */
+export const landRecommendations = pgTable(
+  "land_recommendations",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    zoneId: pgUuid("zone_id").notNull(),
+    subzoneId: pgUuid("subzone_id"),
+
+    recommendationDate: date("recommendation_date").notNull(),
+    recommendationType: text("recommendation_type").notNull(), // rest | graze | seed | caution
+    priority: text("priority").notNull().default("medium"), // low | medium | high
+    title: text("title").notNull(),
+    rationale: text("rationale").notNull(),
+    actionByDate: date("action_by_date"),
+    confidenceScore: decimal("confidence_score"),
+    status: text("status").notNull().default("open"), // open | accepted | dismissed | completed
+    metadata: jsonb("metadata"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("land_recommendations_ranch_idx").on(t.ranchId),
+    zoneDateIdx: index("land_recommendations_zone_date_idx").on(t.zoneId, t.recommendationDate),
+    statusIdx: index("land_recommendations_status_idx").on(t.status),
   })
 );
 

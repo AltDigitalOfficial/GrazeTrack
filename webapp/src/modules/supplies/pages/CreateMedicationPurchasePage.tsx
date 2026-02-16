@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -14,6 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type ActiveMedicationOption = {
   id: string;
@@ -106,7 +113,7 @@ function buildNewMedPreview(v: Partial<FormValues>) {
     v.concentrationValue && v.concentrationUnit
       ? ` ${v.concentrationValue}${v.concentrationUnit}`
       : "";
-  return `${brand} — ${chem}${conc} (${fmt})`;
+  return `${brand} â€” ${chem}${conc} (${fmt})`;
 }
 
 function canonicalUnitFromFormat(format?: string): string {
@@ -188,7 +195,7 @@ function LocalImageCarousel({
           <div className="text-sm font-medium">{title}</div>
           <div className="text-xs text-muted-foreground">
             {images.length} photo{images.length === 1 ? "" : "s"}
-            {active?.sizeBytes ? ` • ${bytesToNiceSize(active.sizeBytes)}` : ""}
+            {active?.sizeBytes ? ` â€¢ ${bytesToNiceSize(active.sizeBytes)}` : ""}
           </div>
         </div>
 
@@ -288,8 +295,8 @@ function ImageCarousel({
           <div className="font-medium">{title}</div>
           <div className="text-xs text-muted-foreground">
             {images.length} photo{images.length === 1 ? "" : "s"}
-            {active?.purpose ? ` • ${active.purpose}` : ""}
-            {active?.sizeBytes ? ` • ${bytesToNiceSize(active.sizeBytes)}` : ""}
+            {active?.purpose ? ` â€¢ ${active.purpose}` : ""}
+            {active?.sizeBytes ? ` â€¢ ${bytesToNiceSize(active.sizeBytes)}` : ""}
           </div>
         </div>
 
@@ -581,7 +588,7 @@ export default function CreateMedicationPurchasePage() {
       }
     }
 
-    // Base payload fields (we’ll use these for both JSON and multipart)
+    // Base payload fields (weâ€™ll use these for both JSON and multipart)
     const basePayload: Record<string, unknown> = {
       quantity: parsed.quantity.trim(),
       purchaseDate: parsed.purchaseDate,
@@ -723,24 +730,24 @@ export default function CreateMedicationPurchasePage() {
                 <>
                   {optionsError && <div className="text-sm text-red-600">Error: {optionsError}</div>}
 
-                  <select
-                    id="standardMedicationId"
-                    aria-label="Medication"
-                    title="Medication"
-                    className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    disabled={!canInteract || loadingOptions}
-                    value={form.getValues("standardMedicationId") || ""}
-                    onChange={(e) =>
-                      form.setValue("standardMedicationId", e.target.value, { shouldValidate: true })
+                  <Select
+                    value={form.watch("standardMedicationId") || ""}
+                    onValueChange={(value) =>
+                      form.setValue("standardMedicationId", value, { shouldValidate: true })
                     }
+                    disabled={!canInteract || loadingOptions}
                   >
-                    <option value="">{loadingOptions ? "Loading…" : "Select a medication…"}</option>
-                    {options.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.displayName}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="standardMedicationId" aria-label="Medication" title="Medication">
+                      <SelectValue placeholder={loadingOptions ? "Loading…" : "Select a medication…"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
                   {form.formState.errors.standardMedicationId?.message && (
                     <p className="text-sm text-red-600">
@@ -756,7 +763,7 @@ export default function CreateMedicationPurchasePage() {
                   )}
 
                   <p className="text-xs text-muted-foreground">
-                    Only active standards appear here. Retired standards won’t show.
+                    Only active standards appear here. Retired standards wonâ€™t show.
                   </p>
                 </>
               )}
@@ -790,7 +797,7 @@ export default function CreateMedicationPurchasePage() {
               <Label htmlFor="supplierName">Supplier</Label>
               <Input
                 id="supplierName"
-                placeholder="Walmart, Valley Vet, Local Co-op…"
+                placeholder="Walmart, Valley Vet, Local Co-opâ€¦"
                 {...form.register("supplierName")}
                 disabled={!canInteract}
               />
@@ -830,21 +837,22 @@ export default function CreateMedicationPurchasePage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="formatSelect">Format</Label>
-                    <select
-                      id="formatSelect"
-                      aria-label="Medication format"
-                      title="Medication format"
-                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    <Select
+                      value={form.watch("format") || "pill"}
+                      onValueChange={(value) => form.setValue("format", value, { shouldValidate: true })}
                       disabled={!canInteract}
-                      value={form.getValues("format") || "pill"}
-                      onChange={(e) => form.setValue("format", e.target.value, { shouldValidate: true })}
                     >
-                      {medicationFormatOptions.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger id="formatSelect" aria-label="Medication format" title="Medication format">
+                        <SelectValue placeholder="Select format" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {medicationFormatOptions.map((opt) => (
+                          <SelectItem key={opt} value={opt}>
+                            {opt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     {form.formState.errors.format?.message && (
                       <p className="text-sm text-red-600">{form.formState.errors.format.message}</p>
                     )}
@@ -873,21 +881,26 @@ export default function CreateMedicationPurchasePage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="concentrationUnitSelect">Concentration unit (optional)</Label>
-                    <select
-                      id="concentrationUnitSelect"
-                      aria-label="Concentration unit"
-                      title="Concentration unit"
-                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    <Select
+                      value={form.watch("concentrationUnit") || "mg"}
+                      onValueChange={(value) => form.setValue("concentrationUnit", value)}
                       disabled={!canInteract}
-                      value={form.getValues("concentrationUnit") || "mg"}
-                      onChange={(e) => form.setValue("concentrationUnit", e.target.value)}
                     >
-                      {concentrationUnitOptions.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger
+                        id="concentrationUnitSelect"
+                        aria-label="Concentration unit"
+                        title="Concentration unit"
+                      >
+                        <SelectValue placeholder="Select unit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {concentrationUnitOptions.map((opt) => (
+                          <SelectItem key={opt} value={opt}>
+                            {opt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="space-y-2 md:col-span-2">
@@ -936,7 +949,7 @@ export default function CreateMedicationPurchasePage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {loadingStandardImages && (
-                <div className="text-sm text-muted-foreground">Loading photos…</div>
+                <div className="text-sm text-muted-foreground">Loading photosâ€¦</div>
               )}
 
               {!loadingStandardImages && standardImagesError && (
@@ -948,7 +961,7 @@ export default function CreateMedicationPurchasePage() {
               )}
 
               <p className="text-xs text-muted-foreground">
-                Tip: photos help confirm you’re selecting the right product.
+                Tip: photos help confirm youâ€™re selecting the right product.
               </p>
             </CardContent>
           </Card>
@@ -961,7 +974,7 @@ export default function CreateMedicationPurchasePage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="text-sm text-muted-foreground">
-              Add a receipt or packaging photos now so you don’t have to dig later.
+              Add a receipt or packaging photos now so you donâ€™t have to dig later.
             </div>
 
             {(["receipt", "label", "packaging", "misc"] as PurchaseImagePurpose[]).map((purpose) => (
@@ -1012,10 +1025,13 @@ export default function CreateMedicationPurchasePage() {
             Cancel
           </Button>
           <Button type="submit" disabled={!canInteract || form.formState.isSubmitting}>
-            {form.formState.isSubmitting ? "Saving…" : "Save Purchase"}
+            {form.formState.isSubmitting ? "Savingâ€¦" : "Save Purchase"}
           </Button>
         </div>
       </form>
     </div>
   );
 }
+
+
+

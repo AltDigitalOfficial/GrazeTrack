@@ -4,6 +4,14 @@ import { MoreHorizontal } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { AlertBanner } from "@/components/ui/alert-banner";
+import {
+  ActionMenu,
+  ActionMenuContent,
+  ActionMenuItem,
+  ActionMenuSeparator,
+  ActionMenuTrigger,
+} from "@/components/ui/action-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,8 +24,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ROUTES } from "@/routes";
 import { apiDelete, apiGet } from "@/lib/api";
-
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
 type HerdCounts = {
   male: number;
@@ -234,11 +240,7 @@ export default function ListHerdPage() {
         </Button>
       </div>
 
-      {errorMsg && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800 text-sm">
-          {errorMsg}
-        </div>
-      )}
+      {errorMsg && <AlertBanner variant="error">{errorMsg}</AlertBanner>}
 
       {showEmptyState ? (
         <Card className="rounded-xl border bg-white p-6">
@@ -282,8 +284,8 @@ export default function ListHerdPage() {
                     ) : null}
                   </div>
 
-                  <DropdownMenu.Root>
-                    <DropdownMenu.Trigger asChild>
+                  <ActionMenu>
+                    <ActionMenuTrigger asChild>
                       <button
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white hover:bg-stone-50"
                         aria-label="Open herd menu"
@@ -291,65 +293,47 @@ export default function ListHerdPage() {
                       >
                         <MoreHorizontal className="h-4 w-4" />
                       </button>
-                    </DropdownMenu.Trigger>
-
-                    <DropdownMenu.Content
-                      align="end"
-                      className="z-50 min-w-45 rounded-md border bg-white p-1 shadow-md"
-                    >
-                      <DropdownMenu.Item
-                        className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
-                        onSelect={() => navigate(ROUTES.herd.edit, { state: { herdId: herd.id } })}
-                      >
+                    </ActionMenuTrigger>
+                    <ActionMenuContent className="min-w-45">
+                      <ActionMenuItem onSelect={() => navigate(ROUTES.herd.edit, { state: { herdId: herd.id } })}>
                         Edit herd
-                      </DropdownMenu.Item>
+                      </ActionMenuItem>
 
-                      <DropdownMenu.Item
-                        className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
+                      <ActionMenuItem
                         onSelect={() =>
                           navigate(ROUTES.herd.animals, { state: { herdId: herd.id } })
                         }
                       >
                         View animals
-                      </DropdownMenu.Item>
+                      </ActionMenuItem>
 
                       {isTransfer ? (
-                        <DropdownMenu.Item
-                          className="cursor-not-allowed rounded px-2 py-1.5 text-sm text-stone-400 outline-none"
-                          disabled
-                        >
+                        <ActionMenuItem disabled>
                           Transfer herd (system)
-                        </DropdownMenu.Item>
+                        </ActionMenuItem>
                       ) : (
-                        <DropdownMenu.Item
-                          className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-stone-100"
+                        <ActionMenuItem
                           onSelect={() => {
                             // placeholder: transfer action can be wired later
                           }}
                         >
                           Transfer herd
-                        </DropdownMenu.Item>
+                        </ActionMenuItem>
                       )}
 
-                      <DropdownMenu.Separator className="my-1 h-px bg-stone-200" />
+                      <ActionMenuSeparator className="my-1 h-px bg-stone-200" />
 
                       {canDelete ? (
-                        <DropdownMenu.Item
-                          className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none text-red-700 hover:bg-red-50"
-                          onSelect={() => openDeleteDialog(herd)}
-                        >
+                        <ActionMenuItem variant="destructive" onSelect={() => openDeleteDialog(herd)}>
                           Delete herd
-                        </DropdownMenu.Item>
+                        </ActionMenuItem>
                       ) : (
-                        <DropdownMenu.Item
-                          className="cursor-not-allowed rounded px-2 py-1.5 text-sm text-stone-400 outline-none"
-                          disabled
-                        >
+                        <ActionMenuItem disabled>
                           Delete herd (empty only)
-                        </DropdownMenu.Item>
+                        </ActionMenuItem>
                       )}
-                    </DropdownMenu.Content>
-                  </DropdownMenu.Root>
+                    </ActionMenuContent>
+                  </ActionMenu>
                 </div>
 
                 <div className="mt-4 space-y-3">
