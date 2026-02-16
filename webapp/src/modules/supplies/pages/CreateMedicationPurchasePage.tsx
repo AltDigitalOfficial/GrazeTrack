@@ -100,39 +100,6 @@ const FormSchema = z.object({
 
 type FormValues = z.input<typeof FormSchema>;
 
-type CreateNewMedicationPayload = {
-  chemicalName: string;
-  format: string;
-  concentrationValue: string | null;
-  concentrationUnit: string | null;
-  manufacturerName: string;
-  brandName: string;
-  onLabelDoseText: string | null;
-  onLabelDoseAmount: string | null;
-  onLabelDoseUnit: string | null;
-  onLabelPerAmount: string | null;
-  onLabelPerUnit: string | null;
-  applicableSpecies: string[];
-  standard: {
-    usesOffLabel: boolean;
-    standardDoseText: string;
-    standardDoseAmount: string;
-    standardDoseUnit: string;
-    standardPerAmount: string;
-    standardPerUnit: string;
-    startDate: string;
-  };
-};
-
-type CreatePurchasePayload = {
-  quantity: string;
-  purchaseDate: string;
-  totalPrice: string | null;
-  supplierName: string;
-  standardMedicationId?: string;
-  createNewMedication?: CreateNewMedicationPayload;
-};
-
 function todayIsoDate(): string {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -662,7 +629,7 @@ export default function CreateMedicationPurchasePage() {
     }
 
     // Base payload fields (weâ€™ll use these for both JSON and multipart)
-    const basePayload: CreatePurchasePayload = {
+    const basePayload: Record<string, unknown> = {
       quantity: parsed.quantity.trim(),
       purchaseDate: parsed.purchaseDate,
       totalPrice: parsed.totalPrice && parsed.totalPrice.trim().length > 0 ? parsed.totalPrice.trim() : null,
@@ -761,6 +728,7 @@ export default function CreateMedicationPurchasePage() {
         return;
       }
 
+    
       // Multipart submit (purchase fields + optional createNewMedication JSON + images)
       const fd = new FormData();
       fd.append("quantity", basePayload.quantity);
@@ -806,7 +774,7 @@ export default function CreateMedicationPurchasePage() {
         <div>
           <h1 className="text-2xl font-semibold">Record Medication Purchase</h1>
           <p className="text-sm text-muted-foreground">
-            Record a purchase. Inventory updates automatically.
+            Add an append-only purchase record. Inventory updates automatically.
           </p>
         </div>
 
@@ -888,7 +856,7 @@ export default function CreateMedicationPurchasePage() {
                   )}
 
                   <p className="text-xs text-muted-foreground">
-                    Only current standards appear here. Older standards are hidden.
+                    Only active standards appear here. Retired standards wonâ€™t show.
                   </p>
                 </>
               )}
@@ -922,7 +890,7 @@ export default function CreateMedicationPurchasePage() {
               <Label htmlFor="supplierName">Supplier</Label>
               <Input
                 id="supplierName"
-                placeholder="Walmart, Valley Vet, Local Co-op, etc."
+                placeholder="Walmart, Valley Vet, Local Co-op"
                 {...form.register("supplierName")}
                 disabled={!canInteract}
               />
@@ -930,7 +898,7 @@ export default function CreateMedicationPurchasePage() {
                 <p className="text-sm text-red-600">{form.formState.errors.supplierName.message}</p>
               )}
               <p className="text-xs text-muted-foreground">
-                We will save this supplier name so you can track spend by supplier later.
+                Supplier will be upserted for spend reporting later.
               </p>
             </div>
           </CardContent>
