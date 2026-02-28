@@ -1,12 +1,18 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
+import { z } from "zod";
 
 import { db } from "../db";
 import { users, userRanches, ranches } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
+import { getActiveRanchIdForUser, setActiveRanchIdForUser } from "../lib/activeRanch";
 
 export async function meRoutes(app: FastifyInstance) {
+  const SetActiveRanchBody = z.object({
+    ranchId: z.string().uuid().nullable(),
+  });
+
   app.get("/me", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const uid = req.auth!.uid;
@@ -28,6 +34,7 @@ export async function meRoutes(app: FastifyInstance) {
           id: newId,
           firebaseUid: uid,
           email,
+          activeRanchId: null,
         });
 
         const created = await db.select().from(users).where(eq(users.id, newId)).limit(1);
@@ -49,10 +56,11 @@ export async function meRoutes(app: FastifyInstance) {
         })
         .from(userRanches)
         .leftJoin(ranches, eq(userRanches.ranchId, ranches.id))
-        .where(eq(userRanches.userId, dbUser.id));
+        .where(eq(userRanches.userId, dbUser.id))
+        .orderBy(desc(userRanches.createdAt));
 
-      // 3) Single-ranch assumption (for now)
-      const activeRanchId = memberships[0]?.ranchId ?? null;
+      // 3) Active ranch pointer on users.active_ranch_id (with safe fallback)
+      const activeRanchId = await getActiveRanchIdForUser(dbUser.id);
 
       return reply.send({
         user: {
@@ -71,6 +79,30 @@ export async function meRoutes(app: FastifyInstance) {
         error: "Failed to load profile",
         message: err?.message,
         cause: err?.cause?.message,
+      });
+    }
+  });
+
+  app.put("/me/active-ranch", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const parsed = SetActiveRanchBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: "Invalid active ranch payload",
+          details: parsed.error.flatten(),
+        });
+      }
+
+      const ranchId = await setActiveRanchIdForUser(req.auth!.userId, parsed.data.ranchId);
+      return reply.send({ activeRanchId: ranchId });
+    } catch (err: any) {
+      if (String(err?.message || "").includes("not in user memberships")) {
+        return reply.status(403).send({ error: "Forbidden" });
+      }
+      req.log.error({ err }, "Failed to set active ranch");
+      return reply.status(500).send({
+        error: "Failed to set active ranch",
+        message: err?.message,
       });
     }
   });

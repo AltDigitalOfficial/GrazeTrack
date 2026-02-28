@@ -51,13 +51,14 @@ export const ranches = pgTable("ranches", {
  * Users (local mirror of Firebase users)
  *
  * NOTE:
- * - We keep users.id as TEXT because it is (or is treated like) the Firebase UID in auth flows.
- * - Converting users.id to UUID would require a broader auth/membership refactor.
+ * - users.id is the local DB user id (UUID string stored in text).
+ * - firebase_uid stores the Firebase principal id.
  */
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
   firebaseUid: text("firebase_uid").notNull(),
   email: text("email"),
+  activeRanchId: pgUuid("active_ranch_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -793,11 +794,18 @@ export const ranchMedicationStandards = pgTable(
     standardDoseUnit: text("standard_dose_unit"),
     standardPerAmount: decimal("standard_per_amount"),
     standardPerUnit: text("standard_per_unit"),
+    species: text("species"),
   },
   (t) => ({
     ranchIdx: index("ranch_med_standards_ranch_idx").on(t.ranchId),
     medIdx: index("ranch_med_standards_med_idx").on(t.standardMedicationId),
     activeLookupIdx: index("ranch_med_standards_active_lookup_idx").on(t.ranchId, t.standardMedicationId, t.endDate),
+    speciesLookupIdx: index("ranch_med_standards_species_lookup_idx").on(
+      t.ranchId,
+      t.standardMedicationId,
+      t.species,
+      t.endDate
+    ),
   })
 );
 

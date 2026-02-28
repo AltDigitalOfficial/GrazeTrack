@@ -4,9 +4,10 @@ import { z } from "zod";
 import { v4 as uuid } from "uuid";
 
 import { db } from "../db";
-import { animalHerdMembership, animals, herds, userRanches } from "../db/schema";
+import { animalHerdMembership, animals, herds } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
 import { logAndSendInternalError, sendError } from "../lib/http";
+import { getActiveRanchIdForUser } from "../lib/activeRanch";
 
 const MIXED_VALUE = "Mixed";
 const OTHER_VALUE = "Other";
@@ -23,13 +24,7 @@ type HerdCounts = {
  * Resolve the active ranch for the authenticated user.
  */
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  const rows = await db
-    .select({ ranchId: userRanches.ranchId })
-    .from(userRanches)
-    .where(eq(userRanches.userId, userId))
-    .limit(1);
-
-  return rows[0]?.ranchId ?? null;
+  return getActiveRanchIdForUser(userId);
 }
 
 function getBabyCutoffDate(): Date {

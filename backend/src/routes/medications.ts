@@ -8,13 +8,15 @@ import fs from "fs";
 import { ensureRanchStructure, saveUploadedFile } from "../../lib/storage.js";
 import { db } from "../db";
 import {
-  userRanches,
   standardMedications,
   ranchMedicationStandards,
   medicationPurchases,
   standardMedicationImages,
+  ranchSpecies,
+  herds,
 } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
+import { getActiveRanchIdForUser } from "../lib/activeRanch";
 
 /* ------------------------------------------------------------------------------------------------
  * Helpers
@@ -25,13 +27,7 @@ function ensureDir(dirPath: string) {
 }
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  const rows = await db
-    .select({ ranchId: userRanches.ranchId })
-    .from(userRanches)
-    .where(eq(userRanches.userId, userId))
-    .limit(1);
-
-  return rows[0]?.ranchId ?? null;
+  return getActiveRanchIdForUser(userId);
 }
 
 function todayIsoDate(): string {
@@ -160,6 +156,14 @@ function normalizeBody(raw: Record<string, any>): Record<string, any> {
     }
   }
 
+  if (typeof out.speciesStandards === "string") {
+    try {
+      out.speciesStandards = JSON.parse(out.speciesStandards);
+    } catch {
+      // leave as-is so validation returns a clear error
+    }
+  }
+
   return out;
 }
 
@@ -193,6 +197,20 @@ const CreateStandardMedicationBody = z.object({
     standardPerUnit: z.string().min(1),
     startDate: z.string().min(10).optional(),
   }),
+  speciesStandards: z
+    .array(
+      z.object({
+        species: z.string().min(1),
+        usesOffLabel: z.union([z.boolean(), z.string()]).transform((v) => v === true || v === "true"),
+        standardDoseText: z.string().optional().nullable(),
+        standardDoseAmount: decimalInputSchema(),
+        standardDoseUnit: z.string().min(1),
+        standardPerAmount: decimalInputSchema(),
+        standardPerUnit: z.string().min(1),
+        startDate: z.string().min(10).optional(),
+      })
+    )
+    .optional(),
 }).superRefine((data, ctx) => {
   const onLabelParts = [
     data.onLabelDoseAmount,
@@ -209,6 +227,29 @@ const CreateStandardMedicationBody = z.object({
       message: "On-label structured dosing requires amount/unit and per-amount/per-unit.",
       path: ["onLabelDoseAmount"],
     });
+  }
+
+  if (data.speciesStandards && data.speciesStandards.length > 0) {
+    const seen = new Set<string>();
+    for (const row of data.speciesStandards) {
+      const key = row.species.trim().toLowerCase();
+      if (!key.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Species is required for species-specific standards.",
+          path: ["speciesStandards"],
+        });
+        continue;
+      }
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Duplicate species found in species-specific standards.",
+          path: ["speciesStandards"],
+        });
+      }
+      seen.add(key);
+    }
   }
 });
 
@@ -228,6 +269,40 @@ const StandardImagesParams = z.object({ standardMedicationId: z.string().min(1) 
  * ------------------------------------------------------------------------------------------------ */
 
 export async function medicationsRoutes(app: FastifyInstance) {
+  app.get("/medications/species-options", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const ranchId = await getActiveRanchId(req.auth!.userId);
+      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+
+      const [ranchSpeciesRows, herdRows] = await Promise.all([
+        db
+          .select({ species: ranchSpecies.species })
+          .from(ranchSpecies)
+          .where(eq(ranchSpecies.ranchId, ranchId)),
+        db
+          .select({ species: herds.species })
+          .from(herds)
+          .where(and(eq(herds.ranchId, ranchId), sql`${herds.species} IS NOT NULL`)),
+      ]);
+
+      const species = Array.from(
+        new Set(
+          [...ranchSpeciesRows, ...herdRows]
+            .map((row) => String(row.species ?? "").trim())
+            .filter((s) => s.length > 0 && s.toLowerCase() !== "mixed")
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      return reply.send({ species });
+    } catch (err: any) {
+      req.log.error({ err }, "Failed to load medication species options");
+      return reply.status(500).send({
+        error: "Failed to load medication species options",
+        message: err?.message,
+      });
+    }
+  });
+
   app.post("/standard-medications", { preHandler: requireAuth }, async (req, reply) => {
     try {
       const ranchId = await getActiveRanchId(req.auth!.userId);
@@ -246,19 +321,8 @@ export async function medicationsRoutes(app: FastifyInstance) {
 
       const data = parsed.data;
       const medicationId = crypto.randomUUID();
-      const standardId = crypto.randomUUID();
 
       const now = new Date();
-      const startDate = data.standard.startDate ?? todayIsoDate();
-      const standardDoseText =
-        data.standard.standardDoseText && data.standard.standardDoseText.trim().length > 0
-          ? data.standard.standardDoseText.trim()
-          : formatDoseText(
-              data.standard.standardDoseAmount,
-              data.standard.standardDoseUnit,
-              data.standard.standardPerAmount,
-              data.standard.standardPerUnit
-            );
       const onLabelDoseText =
         data.onLabelDoseText && data.onLabelDoseText.trim().length > 0
           ? data.onLabelDoseText.trim()
@@ -270,6 +334,58 @@ export async function medicationsRoutes(app: FastifyInstance) {
                 String(data.onLabelPerUnit)
               )
             : null;
+      const standardsInput =
+        data.speciesStandards && data.speciesStandards.length > 0
+          ? data.speciesStandards.map((row) => ({
+              species: row.species.trim(),
+              usesOffLabel: row.usesOffLabel,
+              standardDoseText:
+                row.standardDoseText && row.standardDoseText.trim().length > 0
+                  ? row.standardDoseText.trim()
+                  : formatDoseText(
+                      row.standardDoseAmount,
+                      row.standardDoseUnit,
+                      row.standardPerAmount,
+                      row.standardPerUnit
+                    ),
+              standardDoseAmount: String(row.standardDoseAmount),
+              standardDoseUnit: row.standardDoseUnit,
+              standardPerAmount: String(row.standardPerAmount),
+              standardPerUnit: row.standardPerUnit,
+              startDate: row.startDate ?? todayIsoDate(),
+            }))
+          : [
+              {
+                species: null as string | null,
+                usesOffLabel: data.standard.usesOffLabel,
+                standardDoseText:
+                  data.standard.standardDoseText && data.standard.standardDoseText.trim().length > 0
+                    ? data.standard.standardDoseText.trim()
+                    : formatDoseText(
+                        data.standard.standardDoseAmount,
+                        data.standard.standardDoseUnit,
+                        data.standard.standardPerAmount,
+                        data.standard.standardPerUnit
+                      ),
+                standardDoseAmount: String(data.standard.standardDoseAmount),
+                standardDoseUnit: data.standard.standardDoseUnit,
+                standardPerAmount: String(data.standard.standardPerAmount),
+                standardPerUnit: data.standard.standardPerUnit,
+                startDate: data.standard.startDate ?? todayIsoDate(),
+              },
+            ];
+      const createdStandards: Array<{
+        id: string;
+        species: string | null;
+        usesOffLabel: boolean;
+        standardDoseText: string;
+        standardDoseAmount: string;
+        standardDoseUnit: string;
+        standardPerAmount: string;
+        standardPerUnit: string;
+        startDate: string;
+        endDate: string | null;
+      }> = [];
 
       await db.transaction(async (tx) => {
         await tx.insert(standardMedications).values({
@@ -293,20 +409,36 @@ export async function medicationsRoutes(app: FastifyInstance) {
           createdAt: now,
         });
 
-        await tx.insert(ranchMedicationStandards).values({
-          id: standardId,
-          ranchId,
-          standardMedicationId: medicationId,
-          usesOffLabel: data.standard.usesOffLabel,
-          standardDoseText,
-          standardDoseAmount: String(data.standard.standardDoseAmount),
-          standardDoseUnit: data.standard.standardDoseUnit,
-          standardPerAmount: String(data.standard.standardPerAmount),
-          standardPerUnit: data.standard.standardPerUnit,
-          startDate,
-          endDate: null,
-          createdAt: now,
-        });
+        for (const row of standardsInput) {
+          const standardId = crypto.randomUUID();
+          await tx.insert(ranchMedicationStandards).values({
+            id: standardId,
+            ranchId,
+            standardMedicationId: medicationId,
+            species: row.species,
+            usesOffLabel: row.usesOffLabel,
+            standardDoseText: row.standardDoseText,
+            standardDoseAmount: row.standardDoseAmount,
+            standardDoseUnit: row.standardDoseUnit,
+            standardPerAmount: row.standardPerAmount,
+            standardPerUnit: row.standardPerUnit,
+            startDate: row.startDate,
+            endDate: null,
+            createdAt: now,
+          });
+          createdStandards.push({
+            id: standardId,
+            species: row.species,
+            usesOffLabel: row.usesOffLabel,
+            standardDoseText: row.standardDoseText,
+            standardDoseAmount: row.standardDoseAmount,
+            standardDoseUnit: row.standardDoseUnit,
+            standardPerAmount: row.standardPerAmount,
+            standardPerUnit: row.standardPerUnit,
+            startDate: row.startDate,
+            endDate: null,
+          });
+        }
       });
 
       if (files.length > 0) {
@@ -348,17 +480,8 @@ export async function medicationsRoutes(app: FastifyInstance) {
                 : String(data.concentrationValue),
             concentrationUnit: data.concentrationUnit ?? null,
           }),
-          currentStandard: {
-            id: standardId,
-            usesOffLabel: data.standard.usesOffLabel,
-            standardDoseText,
-            standardDoseAmount: String(data.standard.standardDoseAmount),
-            standardDoseUnit: data.standard.standardDoseUnit,
-            standardPerAmount: String(data.standard.standardPerAmount),
-            standardPerUnit: data.standard.standardPerUnit,
-            startDate,
-            endDate: null,
-          },
+          currentStandard: createdStandards[0] ?? null,
+          currentStandards: createdStandards,
         },
       });
     } catch (err: any) {
@@ -395,6 +518,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
           standardDoseUnit: ranchMedicationStandards.standardDoseUnit,
           standardPerAmount: ranchMedicationStandards.standardPerAmount,
           standardPerUnit: ranchMedicationStandards.standardPerUnit,
+          species: ranchMedicationStandards.species,
           startDate: ranchMedicationStandards.startDate,
           endDate: ranchMedicationStandards.endDate,
         })
@@ -410,41 +534,98 @@ export async function medicationsRoutes(app: FastifyInstance) {
         .where(eq(standardMedications.ranchId, ranchId))
         .orderBy(standardMedications.chemicalName, standardMedications.brandName);
 
-      return reply.send({
-        medications: rows.map((r) => ({
-          id: r.medicationId,
-          chemicalName: r.chemicalName,
-          format: r.format,
-          concentrationValue: r.concentrationValue,
-          concentrationUnit: r.concentrationUnit,
-          manufacturerName: r.manufacturerName,
-          brandName: r.brandName,
-          onLabelDoseText: r.onLabelDoseText,
-          onLabelDoseAmount: r.onLabelDoseAmount,
-          onLabelDoseUnit: r.onLabelDoseUnit,
-          onLabelPerAmount: r.onLabelPerAmount,
-          onLabelPerUnit: r.onLabelPerUnit,
-          applicableSpecies: r.applicableSpecies,
-          displayName: buildDisplayName({
+      const medicationMap = new Map<
+        string,
+        {
+          id: string;
+          chemicalName: string;
+          format: string;
+          concentrationValue: string | null;
+          concentrationUnit: string | null;
+          manufacturerName: string;
+          brandName: string;
+          onLabelDoseText: string | null;
+          onLabelDoseAmount: string | null;
+          onLabelDoseUnit: string | null;
+          onLabelPerAmount: string | null;
+          onLabelPerUnit: string | null;
+          applicableSpecies: string[] | null;
+          displayName: string;
+          currentStandard: {
+            id: string;
+            species: string | null;
+            usesOffLabel: boolean;
+            standardDoseText: string;
+            standardDoseAmount: string | null;
+            standardDoseUnit: string | null;
+            standardPerAmount: string | null;
+            standardPerUnit: string | null;
+            startDate: string;
+            endDate: string | null;
+          } | null;
+          currentStandards: Array<{
+            id: string;
+            species: string | null;
+            usesOffLabel: boolean;
+            standardDoseText: string;
+            standardDoseAmount: string | null;
+            standardDoseUnit: string | null;
+            standardPerAmount: string | null;
+            standardPerUnit: string | null;
+            startDate: string;
+            endDate: string | null;
+          }>;
+        }
+      >();
+
+      for (const r of rows) {
+        const standardRow = {
+          id: r.standardId,
+          species: r.species,
+          usesOffLabel: r.usesOffLabel,
+          standardDoseText: r.standardDoseText,
+          standardDoseAmount: r.standardDoseAmount,
+          standardDoseUnit: r.standardDoseUnit,
+          standardPerAmount: r.standardPerAmount,
+          standardPerUnit: r.standardPerUnit,
+          startDate: r.startDate,
+          endDate: r.endDate,
+        };
+
+        const existing = medicationMap.get(r.medicationId);
+        if (!existing) {
+          medicationMap.set(r.medicationId, {
+            id: r.medicationId,
             chemicalName: r.chemicalName,
-            brandName: r.brandName,
-            manufacturerName: r.manufacturerName,
             format: r.format,
             concentrationValue: r.concentrationValue,
             concentrationUnit: r.concentrationUnit,
-          }),
-          currentStandard: {
-            id: r.standardId,
-            usesOffLabel: r.usesOffLabel,
-            standardDoseText: r.standardDoseText,
-            standardDoseAmount: r.standardDoseAmount,
-            standardDoseUnit: r.standardDoseUnit,
-            standardPerAmount: r.standardPerAmount,
-            standardPerUnit: r.standardPerUnit,
-            startDate: r.startDate,
-            endDate: r.endDate,
-          },
-        })),
+            manufacturerName: r.manufacturerName,
+            brandName: r.brandName,
+            onLabelDoseText: r.onLabelDoseText,
+            onLabelDoseAmount: r.onLabelDoseAmount,
+            onLabelDoseUnit: r.onLabelDoseUnit,
+            onLabelPerAmount: r.onLabelPerAmount,
+            onLabelPerUnit: r.onLabelPerUnit,
+            applicableSpecies: r.applicableSpecies,
+            displayName: buildDisplayName({
+              chemicalName: r.chemicalName,
+              brandName: r.brandName,
+              manufacturerName: r.manufacturerName,
+              format: r.format,
+              concentrationValue: r.concentrationValue,
+              concentrationUnit: r.concentrationUnit,
+            }),
+            currentStandard: standardRow,
+            currentStandards: [standardRow],
+          });
+          continue;
+        }
+        existing.currentStandards.push(standardRow);
+      }
+
+      return reply.send({
+        medications: Array.from(medicationMap.values()),
       });
     } catch (err: any) {
       req.log.error({ err }, "Failed to list active medications");
@@ -587,6 +768,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
           standardDoseUnit: ranchMedicationStandards.standardDoseUnit,
           standardPerAmount: ranchMedicationStandards.standardPerAmount,
           standardPerUnit: ranchMedicationStandards.standardPerUnit,
+          species: ranchMedicationStandards.species,
           startDate: ranchMedicationStandards.startDate,
           endDate: ranchMedicationStandards.endDate,
           createdAt: ranchMedicationStandards.createdAt,
@@ -627,6 +809,7 @@ export async function medicationsRoutes(app: FastifyInstance) {
           standardDoseUnit: r.standardDoseUnit,
           standardPerAmount: r.standardPerAmount,
           standardPerUnit: r.standardPerUnit,
+          species: r.species,
           concentrationValue: r.concentrationValue,
           concentrationUnit: r.concentrationUnit,
           applicableSpecies: r.applicableSpecies,

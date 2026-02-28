@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "react-router-dom";
 
 import { ROUTES } from "@/routes";
-import { apiPost, apiPostForm } from "@/lib/api";
+import { apiGet, apiPost, apiPostForm } from "@/lib/api";
 import { useRanch } from "@/lib/ranchContext";
 
 import { Button } from "@/components/ui/button";
@@ -70,15 +70,18 @@ const FormSchema = z.object({
   onLabelPerUnit: z.string().optional(),
   applicableSpecies: z.array(z.string()).optional(),
 
-  standardDoseAmount: z.string().min(1, "Dose amount is required"),
-  standardDoseUnit: z.string().min(1, "Dose unit is required"),
-  standardPerAmount: z.string().min(1, "Per amount is required"),
-  standardPerUnit: z.string().min(1, "Per unit is required"),
   startDate: z.string().min(10, "Start date is required"),
-  usesOffLabel: z.boolean().optional(),
 });
 
 type FormValues = z.input<typeof FormSchema>;
+
+type SpeciesStandardDraft = {
+  usesOffLabel: boolean;
+  standardDoseAmount: string;
+  standardDoseUnit: string;
+  standardPerAmount: string;
+  standardPerUnit: string;
+};
 
 function todayIsoDate(): string {
   const d = new Date();
@@ -118,6 +121,16 @@ function looksPositiveNumber(value?: string): boolean {
 
 function buildDoseText(amount: string, unit: string, perAmount: string, perUnit: string): string {
   return `${amount} ${unit} per ${perAmount} ${perUnit}`;
+}
+
+function defaultSpeciesStandardDraft(defaultDoseUnit?: string): SpeciesStandardDraft {
+  return {
+    usesOffLabel: false,
+    standardDoseAmount: "",
+    standardDoseUnit: defaultDoseUnit && defaultDoseUnit.trim().length > 0 ? defaultDoseUnit.trim() : "mL",
+    standardPerAmount: "",
+    standardPerUnit: "lb",
+  };
 }
 
 function LocalImageCarousel({
@@ -234,6 +247,8 @@ export default function CreateStandardMedicationsPage() {
   });
   const [ranchSpeciesOptions, setRanchSpeciesOptions] = useState<string[]>([]);
   const [speciesLoading, setSpeciesLoading] = useState(false);
+  const [speciesLoadError, setSpeciesLoadError] = useState<string | null>(null);
+  const [speciesStandards, setSpeciesStandards] = useState<Record<string, SpeciesStandardDraft>>({});
 
   const form = useForm<FormValues>({
     resolver: zodResolver(FormSchema),
@@ -250,12 +265,7 @@ export default function CreateStandardMedicationsPage() {
       onLabelPerAmount: "",
       onLabelPerUnit: "lb",
       applicableSpecies: [],
-      standardDoseAmount: "",
-      standardDoseUnit: "mL",
-      standardPerAmount: "",
-      standardPerUnit: "lb",
       startDate: todayIsoDate(),
-      usesOffLabel: false,
     },
     mode: "onBlur",
   });
@@ -265,6 +275,7 @@ export default function CreateStandardMedicationsPage() {
   const totalImages = useMemo(() => {
     return Object.values(imagesByPurpose).reduce((sum, arr) => sum + (arr?.length ?? 0), 0);
   }, [imagesByPurpose]);
+  const selectedSpecies = form.watch("applicableSpecies") ?? [];
 
   useEffect(() => {
     if (!activeRanchId) return;
@@ -272,19 +283,77 @@ export default function CreateStandardMedicationsPage() {
 
     const loadSpecies = async () => {
       setSpeciesLoading(true);
+      setSpeciesLoadError(null);
       try {
-        const rs = await apiGet<{ species?: Array<{ species?: string }> }>(
-          `/ranches/${encodeURIComponent(activeRanchId)}/settings`
-        );
+        const [directRes, settingsRes, herdsRes, animalsRes] = await Promise.allSettled([
+          apiGet<{ species?: string[] }>(`/medications/species-options`),
+          apiGet<{ species?: Array<{ species?: string }> }>(`/ranch-settings`),
+          apiGet<Array<{ species?: string | null }> | { herds?: Array<{ species?: string | null }> }>(`/herds`),
+          apiGet<{ animals?: Array<{ species?: string | null }> }>(`/animals`),
+        ]);
+
+        const directSpecies =
+          directRes.status === "fulfilled" && Array.isArray(directRes.value?.species)
+            ? directRes.value.species.map((s) => String(s ?? "").trim()).filter((s) => s.length > 0)
+            : [];
+
+        const settingsSpecies =
+          settingsRes.status === "fulfilled" && Array.isArray(settingsRes.value?.species)
+            ? settingsRes.value.species
+                .map((s) => (s?.species ?? "").trim())
+                .filter((s): s is string => s.length > 0)
+            : [];
+
+        const herdRows =
+          herdsRes.status === "fulfilled"
+            ? Array.isArray(herdsRes.value)
+              ? herdsRes.value
+              : Array.isArray(herdsRes.value?.herds)
+                ? herdsRes.value.herds
+                : []
+            : [];
+
+        const herdSpecies =
+          herdRows
+            .map((h) => (h?.species ?? "").trim())
+            .filter((s): s is string => s.length > 0);
+
+        const animalSpecies =
+          animalsRes.status === "fulfilled" && Array.isArray(animalsRes.value?.animals)
+            ? animalsRes.value.animals
+                .map((a) => (a?.species ?? "").trim())
+                .filter((s): s is string => s.length > 0)
+            : [];
+
+        const values = [...directSpecies, ...settingsSpecies, ...herdSpecies, ...animalSpecies]
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0 && s.toLowerCase() !== "mixed");
+
         if (!alive) return;
-        const values = Array.isArray(rs?.species)
-          ? rs.species
-              .map((s) => (s?.species ?? "").trim())
-              .filter((s): s is string => s.length > 0)
-          : [];
-        setRanchSpeciesOptions(Array.from(new Set(values)).sort((a, b) => a.localeCompare(b)));
-      } catch {
-        if (alive) setRanchSpeciesOptions([]);
+        const deduped = Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+        setRanchSpeciesOptions(deduped);
+
+        const allFailed =
+          directRes.status === "rejected" &&
+          settingsRes.status === "rejected" &&
+          herdsRes.status === "rejected" &&
+          animalsRes.status === "rejected";
+
+        if (allFailed) {
+          setSpeciesLoadError("Unable to load species right now. Refresh the page, then try again.");
+        } else if (deduped.length === 0) {
+          setSpeciesLoadError(
+            "No species were returned from Ranch Settings, Herds, or Animal Inventory for the active ranch."
+          );
+        } else {
+          setSpeciesLoadError(null);
+        }
+      } catch (err: unknown) {
+        if (alive) {
+          setRanchSpeciesOptions([]);
+          const detail = err instanceof Error && err.message.trim() ? ` (${err.message.trim()})` : "";
+          setSpeciesLoadError(`Unable to load species right now. Refresh the page and try again.${detail}`);
+        }
       } finally {
         if (alive) setSpeciesLoading(false);
       }
@@ -330,6 +399,32 @@ export default function CreateStandardMedicationsPage() {
     });
   }
 
+  function toggleApplicableSpecies(species: string, checked: boolean) {
+    const next = new Set(form.getValues("applicableSpecies") ?? []);
+    if (checked) next.add(species);
+    else next.delete(species);
+    form.setValue("applicableSpecies", Array.from(next), { shouldValidate: true });
+    setSpeciesStandards((prev) => {
+      const nextDrafts = { ...prev };
+      if (checked) {
+        nextDrafts[species] = nextDrafts[species] ?? defaultSpeciesStandardDraft(form.getValues("concentrationUnit"));
+      } else {
+        delete nextDrafts[species];
+      }
+      return nextDrafts;
+    });
+  }
+
+  function updateSpeciesStandard(species: string, patch: Partial<SpeciesStandardDraft>) {
+    setSpeciesStandards((prev) => ({
+      ...prev,
+      [species]: {
+        ...(prev[species] ?? defaultSpeciesStandardDraft(form.getValues("concentrationUnit"))),
+        ...patch,
+      },
+    }));
+  }
+
   const onSubmit: SubmitHandler<FormValues> = async (v) => {
     if (!activeRanchId) {
       form.setError("chemicalName", {
@@ -340,15 +435,6 @@ export default function CreateStandardMedicationsPage() {
     }
 
     const parsed = FormSchema.parse(v);
-
-    if (!looksPositiveNumber(parsed.standardDoseAmount)) {
-      form.setError("standardDoseAmount", { type: "validate", message: "Enter a positive number." });
-      return;
-    }
-    if (!looksPositiveNumber(parsed.standardPerAmount)) {
-      form.setError("standardPerAmount", { type: "validate", message: "Enter a positive number." });
-      return;
-    }
 
     const hasAnyOnLabelMath =
       String(parsed.onLabelDoseAmount ?? "").trim().length > 0 ||
@@ -389,22 +475,75 @@ export default function CreateStandardMedicationsPage() {
         ? parsed.concentrationUnit.trim()
         : null;
 
-    const standard = {
-      usesOffLabel: Boolean(parsed.usesOffLabel),
-      standardDoseText: buildDoseText(
-        parsed.standardDoseAmount.trim(),
-        parsed.standardDoseUnit!.trim(),
-        parsed.standardPerAmount.trim(),
-        parsed.standardPerUnit!.trim()
-      ),
-      standardDoseAmount: parsed.standardDoseAmount.trim(),
-      standardDoseUnit: parsed.standardDoseUnit!.trim(),
-      standardPerAmount: parsed.standardPerAmount.trim(),
-      standardPerUnit: parsed.standardPerUnit!.trim(),
-      startDate: parsed.startDate,
-    };
-
     const applicableSpecies = (parsed.applicableSpecies ?? []).map((s) => s.trim()).filter(Boolean);
+    if (applicableSpecies.length === 0) {
+      form.setError("applicableSpecies", {
+        type: "validate",
+        message: "Select at least one species for this medication.",
+      });
+      return;
+    }
+
+    const speciesStandardsPayload: Array<{
+      species: string;
+      usesOffLabel: boolean;
+      standardDoseText: string;
+      standardDoseAmount: string;
+      standardDoseUnit: string;
+      standardPerAmount: string;
+      standardPerUnit: string;
+      startDate: string;
+    }> = [];
+
+    for (const species of applicableSpecies) {
+      const draft = speciesStandards[species] ?? defaultSpeciesStandardDraft(concentrationUnit);
+      if (!looksPositiveNumber(draft.standardDoseAmount)) {
+        form.setError("applicableSpecies", {
+          type: "validate",
+          message: `Enter a valid dose amount for ${species}.`,
+        });
+        return;
+      }
+      if (!looksPositiveNumber(draft.standardPerAmount)) {
+        form.setError("applicableSpecies", {
+          type: "validate",
+          message: `Enter a valid per-amount value for ${species}.`,
+        });
+        return;
+      }
+      if (!draft.standardDoseUnit.trim()) {
+        form.setError("applicableSpecies", {
+          type: "validate",
+          message: `Dose unit is required for ${species}.`,
+        });
+        return;
+      }
+      if (!draft.standardPerUnit.trim()) {
+        form.setError("applicableSpecies", {
+          type: "validate",
+          message: `Per unit is required for ${species}.`,
+        });
+        return;
+      }
+
+      speciesStandardsPayload.push({
+        species,
+        usesOffLabel: draft.usesOffLabel,
+        standardDoseText: buildDoseText(
+          draft.standardDoseAmount.trim(),
+          draft.standardDoseUnit.trim(),
+          draft.standardPerAmount.trim(),
+          draft.standardPerUnit.trim()
+        ),
+        standardDoseAmount: draft.standardDoseAmount.trim(),
+        standardDoseUnit: draft.standardDoseUnit.trim(),
+        standardPerAmount: draft.standardPerAmount.trim(),
+        standardPerUnit: draft.standardPerUnit.trim(),
+        startDate: parsed.startDate,
+      });
+    }
+
+    const standard = speciesStandardsPayload[0];
     const onLabelDoseText =
       parsed.onLabelDoseText && parsed.onLabelDoseText.trim().length > 0
         ? parsed.onLabelDoseText.trim()
@@ -435,6 +574,7 @@ export default function CreateStandardMedicationsPage() {
           onLabelPerUnit: hasAllOnLabelMath ? parsed.onLabelPerUnit!.trim() : null,
           applicableSpecies,
           standard,
+          speciesStandards: speciesStandardsPayload,
         });
 
         navigate(ROUTES.supplies.medications);
@@ -457,6 +597,7 @@ export default function CreateStandardMedicationsPage() {
       }
       fd.append("applicableSpecies", JSON.stringify(applicableSpecies));
       fd.append("standard", JSON.stringify(standard));
+      fd.append("speciesStandards", JSON.stringify(speciesStandardsPayload));
 
       for (const img of imagesByPurpose.label) fd.append("label", img.file, img.originalName);
       for (const img of imagesByPurpose.insert) fd.append("insert", img.file, img.originalName);
@@ -637,25 +778,24 @@ export default function CreateStandardMedicationsPage() {
               <Label>Applicable Species</Label>
               <div className="rounded-md border p-3 space-y-2">
                 {speciesLoading && <div className="text-xs text-muted-foreground">Loading species...</div>}
-                {!speciesLoading && ranchSpeciesOptions.length === 0 && (
+                {!speciesLoading && !speciesLoadError && ranchSpeciesOptions.length === 0 && (
                   <div className="text-xs text-muted-foreground">
-                    No species configured in Ranch Settings yet.
+                    No species found yet. Add species in Ranch Settings or assign species to herds.
                   </div>
+                )}
+                {speciesLoadError && (
+                  <div className="text-xs text-red-600">{speciesLoadError}</div>
                 )}
                 {!speciesLoading && ranchSpeciesOptions.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {ranchSpeciesOptions.map((species) => {
-                      const selected = form.watch("applicableSpecies") ?? [];
-                      const checked = selected.includes(species);
+                      const checked = selectedSpecies.includes(species);
                       return (
                         <label key={species} className="flex items-center gap-2 text-sm">
                           <Checkbox
                             checked={checked}
                             onCheckedChange={(v) => {
-                              const next = new Set(form.getValues("applicableSpecies") ?? []);
-                              if (v === true) next.add(species);
-                              else next.delete(species);
-                              form.setValue("applicableSpecies", Array.from(next), { shouldValidate: true });
+                              toggleApplicableSpecies(species, v === true);
                             }}
                             disabled={!canInteract}
                           />
@@ -666,6 +806,9 @@ export default function CreateStandardMedicationsPage() {
                   </div>
                 )}
               </div>
+              {form.formState.errors.applicableSpecies?.message && (
+                <p className="text-sm text-red-600">{form.formState.errors.applicableSpecies.message}</p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -722,7 +865,7 @@ export default function CreateStandardMedicationsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Ranch Dosing Standard</CardTitle>
+            <CardTitle className="text-base">Species Dosing Standards</CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -733,76 +876,94 @@ export default function CreateStandardMedicationsPage() {
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label>Off-label practice</Label>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={Boolean(form.getValues("usesOffLabel"))}
-                  onCheckedChange={(v) => form.setValue("usesOffLabel", Boolean(v), { shouldValidate: true })}
-                  disabled={!canInteract}
-                />
-                <span className="text-sm">We use off-label dosing practices</span>
-              </div>
-            </div>
+            <div className="md:col-span-2 space-y-4">
+              {selectedSpecies.length === 0 ? (
+                <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                  Select one or more species above, then set a dosing standard for each species.
+                </div>
+              ) : (
+                selectedSpecies.map((species) => {
+                  const draft = speciesStandards[species] ?? defaultSpeciesStandardDraft(form.getValues("concentrationUnit"));
+                  return (
+                    <div key={species} className="rounded-md border p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="font-medium">{species}</div>
+                        <label className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={draft.usesOffLabel}
+                            onCheckedChange={(v) =>
+                              updateSpeciesStandard(species, { usesOffLabel: v === true })
+                            }
+                            disabled={!canInteract}
+                          />
+                          <span>Off-label practice</span>
+                        </label>
+                      </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="standardDoseAmount">Dose amount</Label>
-              <Input id="standardDoseAmount" {...form.register("standardDoseAmount")} disabled={!canInteract} />
-              {form.formState.errors.standardDoseAmount?.message && (
-                <p className="text-sm text-red-600">{form.formState.errors.standardDoseAmount.message}</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label>Dose amount</Label>
+                          <Input
+                            value={draft.standardDoseAmount}
+                            onChange={(e) => updateSpeciesStandard(species, { standardDoseAmount: e.target.value })}
+                            disabled={!canInteract}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Dose unit</Label>
+                          <Input
+                            value={draft.standardDoseUnit}
+                            placeholder={form.watch("concentrationUnit") || "mL"}
+                            onChange={(e) => updateSpeciesStandard(species, { standardDoseUnit: e.target.value })}
+                            disabled={!canInteract}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Per amount</Label>
+                          <Input
+                            value={draft.standardPerAmount}
+                            onChange={(e) => updateSpeciesStandard(species, { standardPerAmount: e.target.value })}
+                            disabled={!canInteract}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Per unit</Label>
+                          <Select
+                            value={draft.standardPerUnit || "lb"}
+                            onValueChange={(value) => updateSpeciesStandard(species, { standardPerUnit: value })}
+                            disabled={!canInteract}
+                          >
+                            <SelectTrigger aria-label={`Per unit for ${species}`} title={`Per unit for ${species}`}>
+                              <SelectValue placeholder="Select per unit" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {dosingPerUnitOptions.map((opt) => (
+                                <SelectItem key={opt} value={opt}>
+                                  {opt}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-muted-foreground">
+                        Standard:{" "}
+                        <span className="font-medium text-stone-700">
+                          {buildDoseText(
+                            draft.standardDoseAmount || "0",
+                            draft.standardDoseUnit || (form.watch("concentrationUnit") || "unit"),
+                            draft.standardPerAmount || "0",
+                            draft.standardPerUnit || "animal"
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
               )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="standardDoseUnit">Dose unit</Label>
-              <Input
-                id="standardDoseUnit"
-                {...form.register("standardDoseUnit")}
-                placeholder={form.watch("concentrationUnit") || "mL"}
-                disabled={!canInteract}
-              />
-              <p className="text-xs text-muted-foreground">
-                Use the same unit family as concentration (for example, mL with mg/mL concentration).
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="standardPerAmount">Per amount</Label>
-              <Input id="standardPerAmount" {...form.register("standardPerAmount")} disabled={!canInteract} />
-              {form.formState.errors.standardPerAmount?.message && (
-                <p className="text-sm text-red-600">{form.formState.errors.standardPerAmount.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="standardPerUnit">Per unit</Label>
-              <Select
-                value={form.watch("standardPerUnit") || "lb"}
-                onValueChange={(value) => form.setValue("standardPerUnit", value, { shouldValidate: true })}
-                disabled={!canInteract}
-              >
-                <SelectTrigger id="standardPerUnit" aria-label="Per unit" title="Per unit">
-                  <SelectValue placeholder="Select per unit" />
-                </SelectTrigger>
-                <SelectContent>
-                  {dosingPerUnitOptions.map((opt) => (
-                    <SelectItem key={opt} value={opt}>
-                      {opt}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2 md:col-span-2">
-              <Label>Derived ranch standard</Label>
-              <div className="rounded-md border px-3 py-2 text-sm text-stone-700 bg-stone-50">
-                {buildDoseText(
-                  form.watch("standardDoseAmount") || "0",
-                  form.watch("standardDoseUnit") || (form.watch("concentrationUnit") || "unit"),
-                  form.watch("standardPerAmount") || "0",
-                  form.watch("standardPerUnit") || "animal"
-                )}
+              <div className="text-xs text-muted-foreground">
+                Dosing can differ by species. Each selected species must have a complete standard.
               </div>
             </div>
           </CardContent>

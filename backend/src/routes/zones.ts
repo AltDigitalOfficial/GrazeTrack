@@ -5,18 +5,13 @@ import { v4 as uuid } from "uuid";
 import { z } from "zod";
 
 import { db } from "../db";
-import { zones, userRanches } from "../db/schema";
+import { zones } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
 import { logAndSendInternalError, sendError } from "../lib/http";
+import { getActiveRanchIdForUser } from "../lib/activeRanch";
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  const rows = await db
-    .select({ ranchId: userRanches.ranchId })
-    .from(userRanches)
-    .where(eq(userRanches.userId, userId))
-    .limit(1);
-
-  return rows[0]?.ranchId ?? null;
+  return getActiveRanchIdForUser(userId);
 }
 
 // Frontend will send GeoJSON strings. (We’ll also accept WKT just in case.)

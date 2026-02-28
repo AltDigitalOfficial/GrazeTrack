@@ -8,7 +8,6 @@ import fs from "fs";
 import { ensureRanchStructure, saveUploadedFile } from "../../lib/storage.js";
 import { db } from "../db";
 import {
-  userRanches,
   suppliers,
   standardMedications,
   ranchMedicationStandards,
@@ -16,6 +15,7 @@ import {
   medicationPurchaseImages,
 } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
+import { getActiveRanchIdForUser } from "../lib/activeRanch";
 
 function ensureDir(dirPath: string) {
   if (!fs.existsSync(dirPath)) {
@@ -24,13 +24,7 @@ function ensureDir(dirPath: string) {
 }
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  const rows = await db
-    .select({ ranchId: userRanches.ranchId })
-    .from(userRanches)
-    .where(eq(userRanches.userId, userId))
-    .limit(1);
-
-  return rows[0]?.ranchId ?? null;
+  return getActiveRanchIdForUser(userId);
 }
 
 function todayIsoDate(): string {

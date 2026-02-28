@@ -20,6 +20,8 @@ export const MedicationStandardRowSchema = z.object({
   medicationDisplayName: z.string(),
   usesOffLabel: z.boolean(),
   standardDoseText: z.string(),
+  species: z.string().nullable().optional(),
+  applicableSpecies: z.array(z.string()).nullable().optional(),
   startDate: z.string(),
   endDate: z.string().nullable(),
   createdAt: z.union([z.string(), z.date()]),

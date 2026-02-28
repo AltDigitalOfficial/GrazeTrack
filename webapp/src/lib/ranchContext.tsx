@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { getMe, type MeResponse } from "@/lib/api";
+import { apiPut, getMe, type MeResponse } from "@/lib/api";
 
 type RanchContextValue = {
   me: MeResponse | null;
@@ -26,11 +26,6 @@ export function RanchProvider({ children }: { children: React.ReactNode }) {
     else localStorage.removeItem("currentRanchId");
   }, []);
 
-  const setActiveRanchId = useCallback((ranchId: string | null) => {
-    setActiveRanchIdState(ranchId);
-    syncLocalStorage(ranchId);
-  }, [syncLocalStorage]);
-
   const refreshMe = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -52,6 +47,26 @@ export function RanchProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
   }, [syncLocalStorage]);
+
+  const setActiveRanchId = useCallback((ranchId: string | null) => {
+    setActiveRanchIdState(ranchId);
+    syncLocalStorage(ranchId);
+    setError(null);
+
+    void (async () => {
+      try {
+        await apiPut<{ activeRanchId: string | null }>("/me/active-ranch", { ranchId });
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error && err.message.trim()
+            ? err.message
+            : "Failed to switch active ranch. Restoring previous ranch context.";
+        setError(message);
+      } finally {
+        await refreshMe();
+      }
+    })();
+  }, [refreshMe, syncLocalStorage]);
 
   useEffect(() => {
     // One-shot auth listener for the whole app

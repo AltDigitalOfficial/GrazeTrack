@@ -22,20 +22,14 @@ import {
 import { requireAuth } from "../plugins/requireAuth";
 import { ensureRanchStructure, saveUploadedFile } from "../../lib/storage.js";
 import { ExistingInventoryIntakeSchema } from "../contracts/animals";
+import { getActiveRanchIdForUser } from "../lib/activeRanch";
 
 /* ------------------------------------------------------------------------------------------------
  * Helpers
  * ------------------------------------------------------------------------------------------------ */
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  // Pick the first ranch membership row.
-  const rows = await db
-    .select({ ranchId: userRanches.ranchId })
-    .from(userRanches)
-    .where(eq(userRanches.userId, userId))
-    .limit(1);
-
-  return rows[0]?.ranchId ?? null;
+  return getActiveRanchIdForUser(userId);
 }
 
 async function requireHerdWithRanchAccess(
@@ -280,7 +274,7 @@ export async function animalsRoutes(app: FastifyInstance) {
   /**
    * GET /api/animals
    *
-   * Lists animals for the user's "active ranch" (first user_ranches row),
+   * Lists animals for the user's active ranch context,
    * based on CURRENT herd membership (end_at is null).
    *
    * Tag columns are derived from animal_tag_history where end_at is null.
@@ -302,8 +296,7 @@ export async function animalsRoutes(app: FastifyInstance) {
         if (herdAccess.ranchId !== ranchId) {
           return reply.status(400).send({
             error: "Herd is not in the active ranch",
-            message:
-              "This backend currently uses your first ranch membership as the active ranch. Switch ranch support can be added later.",
+            message: "Switch active ranch first, then query this herd.",
           });
         }
       }

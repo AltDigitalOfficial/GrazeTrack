@@ -9,7 +9,6 @@ import {
   grazingSessions,
   landRecommendations,
   soilSamples,
-  userRanches,
   zoneDailyStates,
   zoneSubzones,
   zoneWeatherDaily,
@@ -17,14 +16,10 @@ import {
 } from "../db/schema";
 import { logAndSendInternalError, sendError } from "../lib/http";
 import { requireAuth } from "../plugins/requireAuth";
+import { getActiveRanchIdForUser } from "../lib/activeRanch";
 
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  const rows = await db
-    .select({ ranchId: userRanches.ranchId })
-    .from(userRanches)
-    .where(eq(userRanches.userId, userId))
-    .limit(1);
-  return rows[0]?.ranchId ?? null;
+  return getActiveRanchIdForUser(userId);
 }
 
 function parseDecimal(v: unknown): number | null {

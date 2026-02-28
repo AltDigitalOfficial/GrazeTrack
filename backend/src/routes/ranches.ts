@@ -8,6 +8,7 @@ import { ensureRanchStructure, saveUploadedFile } from "../../lib/storage.js";
 import { db } from "../db";
 import { ranches, userRanches, herds, ranchSpecies, ranchAgeBands } from "../db/schema";
 import { requireAuth } from "../plugins/requireAuth";
+import { getActiveRanchIdForUser } from "../lib/activeRanch";
 
 function toNullIfEmpty(s?: string): string | null {
   if (s == null) return null;
@@ -19,13 +20,7 @@ function toNullIfEmpty(s?: string): string | null {
  * Resolve the active ranch for the authenticated user.
  */
 async function getActiveRanchId(userId: string): Promise<string | null> {
-  const rows = await db
-    .select({ ranchId: userRanches.ranchId })
-    .from(userRanches)
-    .where(eq(userRanches.userId, userId))
-    .limit(1);
-
-  return rows[0]?.ranchId ?? null;
+  return getActiveRanchIdForUser(userId);
 }
 
 /**

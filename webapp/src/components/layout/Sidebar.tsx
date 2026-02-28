@@ -6,10 +6,17 @@ import { auth } from "@/lib/firebase";
 import { ROUTES } from "@/routes";
 import { useRanch } from "@/lib/ranchContext";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function Sidebar() {
   const location = useLocation();
-  const { me, activeRanchId, loading } = useRanch();
+  const { me, activeRanchId, loading, setActiveRanchId } = useRanch();
 
   // Active section detection (match ROUTES prefixes)
   const herdActive = location.pathname.startsWith(ROUTES.herd.root);
@@ -59,6 +66,25 @@ export function Sidebar() {
       <div className="p-4 border-b border-stone-600 shrink-0">
         <h2 className="text-lg font-bold text-amber-400">GrazeTrack</h2>
         <div className="text-sm text-stone-300 mt-1 truncate">{ranchName}</div>
+        {!loading && (me?.ranches?.length ?? 0) > 1 && (
+          <div className="mt-2">
+            <Select
+              value={activeRanchId ?? ""}
+              onValueChange={(value) => setActiveRanchId(value || null)}
+            >
+              <SelectTrigger aria-label="Active ranch" className="h-8 bg-stone-800 border-stone-600 text-stone-100">
+                <SelectValue placeholder="Select ranch" />
+              </SelectTrigger>
+              <SelectContent>
+                {me?.ranches.map((r) => (
+                  <SelectItem key={r.ranchId} value={r.ranchId}>
+                    {r.ranchName ?? r.ranchId}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       {/* Scrollable nav - takes up space between header and footer */}
