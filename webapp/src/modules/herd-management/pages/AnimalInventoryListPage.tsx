@@ -442,7 +442,7 @@ export default function AnimalInventoryListPage() {
                       aria-label="Just gave birth"
                     />
                     <span className="text-sm text-muted-foreground">
-                      When checked, weâ€™ll record a productivity row for each selected dam.
+                      When checked, we'll record a productivity row for each selected dam.
                     </span>
                   </div>
                 </div>

@@ -661,7 +661,7 @@ export default function CreateMedicationPurchasePage() {
       }
     }
 
-    // Base payload fields (weâ€™ll use these for both JSON and multipart)
+    // Base payload fields (we'll use these for both JSON and multipart)
     const basePayload: CreatePurchasePayload = {
       quantity: parsed.quantity.trim(),
       purchaseDate: parsed.purchaseDate,
@@ -889,7 +889,7 @@ export default function CreateMedicationPurchasePage() {
                   )}
 
                   <p className="text-xs text-muted-foreground">
-                    Only active standards appear here. Retired standards wonâ€™t show.
+                    Only active standards appear here. Retired standards won't show.
                   </p>
                 </>
               )}
@@ -1175,7 +1175,7 @@ export default function CreateMedicationPurchasePage() {
               )}
 
               <p className="text-xs text-muted-foreground">
-                Tip: photos help confirm youâ€™re selecting the right product.
+                Tip: photos help confirm you're selecting the right product.
               </p>
             </CardContent>
           </Card>
@@ -1188,7 +1188,7 @@ export default function CreateMedicationPurchasePage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="text-sm text-muted-foreground">
-              Add a receipt or packaging photos now so you donâ€™t have to dig later.
+              Add a receipt or packaging photos now so you don't have to dig later.
             </div>
 
             {(["receipt", "label", "packaging", "misc"] as PurchaseImagePurpose[]).map((purpose) => (

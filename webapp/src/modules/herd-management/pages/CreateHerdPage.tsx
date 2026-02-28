@@ -330,7 +330,7 @@ export default function CreateHerdPage() {
     if (name.trim().length === 0) return false;
 
     // Block creating a herd if ranch has no species configured.
-    // For edit: allow save even if settings are empty (donâ€™t brick legacy edits).
+    // For edit: allow save even if settings are empty (don't brick legacy edits).
     if (!isEdit && ranchHasNoSpecies) return false;
 
     return true;
@@ -386,7 +386,7 @@ export default function CreateHerdPage() {
 
       {!isEdit && ranchHasNoSpecies && !loadingRanchSettings && (
         <AlertBanner variant="warning" className="space-y-2">
-          <div className="font-medium">You canâ€™t create herds yet.</div>
+          <div className="font-medium">You can't create herds yet.</div>
           <div>
             Before creating herds, add at least one species in Ranch Settings so we know what animals you
             raise on this ranch.
