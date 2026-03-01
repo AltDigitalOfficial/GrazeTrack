@@ -55,7 +55,8 @@ import FuelSuppliesPage from "./modules/supplies/pages/FuelPage";
 import FuelProductsPage from "./modules/supplies/pages/FuelProductsPage";
 import FuelPurchasesPage from "./modules/supplies/pages/FuelPurchasesPage";
 import FuelInventoryPage from "./modules/supplies/pages/FuelInventoryPage";
-import ToolsSuppliesPage from "./modules/supplies/pages/ToolsPage";
+import EquipmentAssetsPage from "./modules/supplies/pages/EquipmentAssetsPage";
+import EquipmentPartsSuppliesPage from "./modules/supplies/pages/EquipmentPartsSuppliesPage";
 
 // Services
 import VetsPage from "./modules/services/pages/VetsPage";
@@ -138,7 +139,9 @@ export const router = createBrowserRouter([
           { path: ROUTES.supplies.fuelProducts, element: <FuelProductsPage /> },
           { path: ROUTES.supplies.fuelPurchases, element: <FuelPurchasesPage /> },
           { path: ROUTES.supplies.fuelInventory, element: <FuelInventoryPage /> },
-          { path: ROUTES.supplies.tools, element: <ToolsSuppliesPage /> },
+          { path: ROUTES.supplies.equipmentAssets, element: <EquipmentAssetsPage /> },
+          { path: ROUTES.supplies.equipmentParts, element: <EquipmentPartsSuppliesPage /> },
+          { path: "/supplies/tools", element: <EquipmentAssetsPage /> },
 
           { path: ROUTES.supplies.medications, element: <MedicationsOverviewPage /> },
           { path: ROUTES.supplies.medicationsHistory, element: <MedicationHistoryPage /> },

@@ -64,7 +64,8 @@ export const ROUTES = {
     fuelProducts: "/supplies/fuel/products",
     fuelPurchases: "/supplies/fuel/purchases",
     fuelInventory: "/supplies/fuel/inventory",
-    tools: "/supplies/tools",
+    equipmentAssets: "/supplies/equipment/assets",
+    equipmentParts: "/supplies/equipment/parts",
   },
 
   services: {

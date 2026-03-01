@@ -28,6 +28,9 @@ export function Sidebar() {
   const adminActive = location.pathname.startsWith(ROUTES.admin.root);
   const feedActive = location.pathname.startsWith("/supplies/feed");
   const fuelActive = location.pathname.startsWith("/supplies/fuel");
+  const equipmentActive =
+    location.pathname.startsWith("/supplies/equipment") ||
+    location.pathname === "/supplies/tools";
 
   const linkClasses = ({ isActive }: { isActive: boolean }) =>
     `block px-2 py-1 rounded ${
@@ -290,9 +293,30 @@ export function Sidebar() {
                   </div>
                 )}
 
-                <NavLink to={ROUTES.supplies.tools} className={nestedLinkClasses}>
-                  Tools
+                <NavLink
+                  to={ROUTES.supplies.equipmentAssets}
+                  className={({ isActive }) =>
+                    `block px-2 py-1 rounded text-sm ml-4 font-semibold ${
+                      equipmentActive || isActive
+                        ? "bg-green-100 text-green-800"
+                        : "text-stone-200 hover:bg-stone-600"
+                    }`
+                  }
+                >
+                  Equipment
                 </NavLink>
+
+                {equipmentActive && (
+                  <div className="space-y-1">
+                    <NavLink to={ROUTES.supplies.equipmentAssets} className={subNestedLinkClasses}>
+                      Assets
+                    </NavLink>
+
+                    <NavLink to={ROUTES.supplies.equipmentParts} className={subNestedLinkClasses}>
+                      Parts & Supplies
+                    </NavLink>
+                  </div>
+                )}
               </div>
             )}
           </div>

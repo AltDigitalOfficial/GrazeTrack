@@ -43,7 +43,8 @@ import FeedPage from "@/modules/supplies/pages/FeedPage";
 import AdditivesPage from "@/modules/supplies/pages/AdditivesPage";
 import MedicationsPage from "@/modules/supplies/pages/MedicationsPage";
 import FuelPage from "@/modules/supplies/pages/FuelPage";
-import ToolsPage from "@/modules/supplies/pages/ToolsPage";
+import EquipmentAssetsPage from "@/modules/supplies/pages/EquipmentAssetsPage";
+import EquipmentPartsSuppliesPage from "@/modules/supplies/pages/EquipmentPartsSuppliesPage";
 
 /* ---------------------------
    SERVICES & SUPPLIERS
@@ -133,7 +134,9 @@ export default function App() {
         <Route path="/supplies/minerals" element={<AdditivesPage />} />
         <Route path="/supplies/medications" element={<MedicationsPage />} />
         <Route path="/supplies/fuel" element={<FuelPage />} />
-        <Route path="/supplies/tools" element={<ToolsPage />} />
+        <Route path="/supplies/equipment/assets" element={<EquipmentAssetsPage />} />
+        <Route path="/supplies/equipment/parts" element={<EquipmentPartsSuppliesPage />} />
+        <Route path="/supplies/tools" element={<EquipmentAssetsPage />} />
 
         {/* SERVICES */}
         <Route path="/services" element={<ServicesOverviewPage />} />

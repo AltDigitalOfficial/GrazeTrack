@@ -14,6 +14,7 @@ import { medicationsRoutes } from "./routes/medications";
 import { medicationPurchasesRoutes } from "./routes/medicationPurchases";
 import { feedRoutes } from "./routes/feed";
 import { fuelRoutes } from "./routes/fuel";
+import { equipmentRoutes } from "./routes/equipment";
 import { animalsRoutes } from "./routes/animals";
 
 async function start() {
@@ -52,6 +53,7 @@ async function start() {
   app.register(medicationPurchasesRoutes, { prefix: "/api" });
   app.register(feedRoutes, { prefix: "/api" });
   app.register(fuelRoutes, { prefix: "/api" });
+  app.register(equipmentRoutes, { prefix: "/api" });
   app.register(animalsRoutes, { prefix: "/api" });
   
   try {

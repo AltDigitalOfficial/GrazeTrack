@@ -1214,3 +1214,154 @@ export const fuelPhotos = pgTable(
     lookupIdx: index("fuel_photos_lookup_idx").on(t.ranchId, t.entityType, t.entityId, t.uploadedAt),
   })
 );
+
+/* =========================================================================================
+ * Equipment Module (v1)
+ * ========================================================================================= */
+
+export const equipmentAssets = pgTable(
+  "equipment_assets",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    name: text("name").notNull(),
+    assetType: text("asset_type").notNull().default("OTHER"),
+    make: text("make"),
+    model: text("model"),
+    modelYear: integer("model_year"),
+    status: text("status").notNull().default("ACTIVE"),
+    acquisitionType: text("acquisition_type").notNull().default("PURCHASED"),
+    acquisitionDate: date("acquisition_date"),
+    purchasePrice: decimal("purchase_price"),
+    currentValueEstimate: decimal("current_value_estimate"),
+    trackMaintenance: boolean("track_maintenance").notNull().default(false),
+    meterType: text("meter_type").notNull().default("NONE"),
+    defaultMeterUnitLabel: text("default_meter_unit_label"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("equipment_assets_ranch_idx").on(t.ranchId),
+    lookupIdx: index("equipment_assets_lookup_idx").on(t.ranchId, t.assetType, t.status, t.name),
+    maintenanceIdx: index("equipment_assets_maintenance_idx").on(t.ranchId, t.trackMaintenance, t.updatedAt),
+  })
+);
+
+export const equipmentAssetIdentifiers = pgTable(
+  "equipment_asset_identifiers",
+  {
+    id: pgUuid("id").primaryKey(),
+    assetId: pgUuid("asset_id").notNull(),
+    identifierType: text("identifier_type").notNull(),
+    identifierValue: text("identifier_value").notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    assetIdx: index("equipment_asset_identifiers_asset_idx").on(t.assetId),
+    lookupIdx: index("equipment_asset_identifiers_lookup_idx").on(t.assetId, t.identifierType, t.identifierValue),
+  })
+);
+
+export const equipmentMaintenanceEvents = pgTable(
+  "equipment_maintenance_events",
+  {
+    id: pgUuid("id").primaryKey(),
+    assetId: pgUuid("asset_id").notNull(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    eventDate: date("event_date").notNull(),
+    eventType: text("event_type").notNull().default("SERVICE"),
+    title: text("title").notNull(),
+    description: text("description"),
+    provider: text("provider"),
+    laborCost: decimal("labor_cost"),
+    partsCost: decimal("parts_cost"),
+    totalCost: decimal("total_cost"),
+    meterReading: decimal("meter_reading"),
+    meterType: text("meter_type"),
+    nextDueDate: date("next_due_date"),
+    nextDueMeter: decimal("next_due_meter"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    assetIdx: index("equipment_maintenance_events_asset_idx").on(t.assetId),
+    ranchDateIdx: index("equipment_maintenance_events_ranch_date_idx").on(t.ranchId, t.eventDate, t.createdAt),
+  })
+);
+
+export const equipmentParts = pgTable(
+  "equipment_parts",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    name: text("name").notNull(),
+    category: text("category").notNull().default("OTHER"),
+    description: text("description"),
+    manufacturer: text("manufacturer"),
+    partNumber: text("part_number"),
+    usedForAssetTypes: text("used_for_asset_types").array().notNull().default([]),
+    unitType: text("unit_type").notNull().default("COUNT"),
+    defaultUnit: text("default_unit").notNull().default("each"),
+    onHandQuantity: decimal("on_hand_quantity").notNull().default("0"),
+    reorderThreshold: decimal("reorder_threshold"),
+    reorderTarget: decimal("reorder_target"),
+    vendor: text("vendor"),
+    costPerUnit: decimal("cost_per_unit"),
+    storageLocation: text("storage_location"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("equipment_parts_ranch_idx").on(t.ranchId),
+    lookupIdx: index("equipment_parts_lookup_idx").on(t.ranchId, t.category, t.isActive, t.name),
+    reorderIdx: index("equipment_parts_reorder_idx").on(t.ranchId, t.reorderThreshold, t.onHandQuantity),
+  })
+);
+
+export const equipmentPartInventoryEvents = pgTable(
+  "equipment_part_inventory_events",
+  {
+    id: pgUuid("id").primaryKey(),
+    partId: pgUuid("part_id").notNull(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    eventDate: date("event_date").notNull(),
+    eventType: text("event_type").notNull().default("ADJUSTMENT"),
+    quantityDelta: decimal("quantity_delta").notNull(),
+    unit: text("unit").notNull().default("each"),
+    unitCost: decimal("unit_cost"),
+    vendor: text("vendor"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    partIdx: index("equipment_part_inventory_events_part_idx").on(t.partId),
+    ranchDateIdx: index("equipment_part_inventory_events_ranch_date_idx").on(t.ranchId, t.eventDate, t.createdAt),
+  })
+);
+
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: pgUuid("entity_id").notNull(),
+    filePath: text("file_path"),
+    storageUrl: text("storage_url"),
+    originalFilename: text("original_filename"),
+    mimeType: text("mime_type"),
+    fileSize: integer("file_size"),
+    metadataJson: jsonb("metadata_json"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("attachments_ranch_idx").on(t.ranchId),
+    lookupIdx: index("attachments_lookup_idx").on(t.ranchId, t.entityType, t.entityId, t.createdAt),
+  })
+);
