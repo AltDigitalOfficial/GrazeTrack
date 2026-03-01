@@ -1105,3 +1105,112 @@ export const feedPhotos = pgTable(
     lookupIdx: index("feed_photos_lookup_idx").on(t.ranchId, t.entityType, t.entityId, t.uploadedAt),
   })
 );
+
+/* =========================================================================================
+ * Fuel & Fluids Module (v1)
+ * ========================================================================================= */
+
+export const fuelProducts = pgTable(
+  "fuel_products",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    name: text("name").notNull(),
+    category: text("category").notNull().default("OTHER"),
+    defaultUnit: text("default_unit").notNull().default("gal"),
+    unitType: text("unit_type").notNull().default("VOLUME"),
+    defaultPackageSize: decimal("default_package_size"),
+    defaultPackageUnit: text("default_package_unit"),
+    notes: text("notes"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("fuel_products_ranch_idx").on(t.ranchId),
+    lookupIdx: index("fuel_products_lookup_idx").on(t.ranchId, t.category, t.isActive, t.name),
+  })
+);
+
+export const fuelPurchases = pgTable(
+  "fuel_purchases",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    purchaseDate: date("purchase_date").notNull(),
+    vendor: text("vendor"),
+    invoiceRef: text("invoice_ref"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("fuel_purchases_ranch_idx").on(t.ranchId),
+    dateIdx: index("fuel_purchases_date_idx").on(t.purchaseDate),
+  })
+);
+
+export const fuelPurchaseItems = pgTable(
+  "fuel_purchase_items",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    fuelPurchaseId: pgUuid("fuel_purchase_id").notNull(),
+    fuelProductId: pgUuid("fuel_product_id").notNull(),
+    quantity: decimal("quantity").notNull(),
+    unit: text("unit").notNull().default("gal"),
+    unitCost: decimal("unit_cost"),
+    totalCost: decimal("total_cost"),
+    unitType: text("unit_type"),
+    normalizedQuantity: decimal("normalized_quantity"),
+    normalizedUnit: text("normalized_unit"),
+    packageSize: decimal("package_size"),
+    packageUnit: text("package_unit"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    purchaseIdx: index("fuel_purchase_items_purchase_idx").on(t.fuelPurchaseId),
+    ranchIdx: index("fuel_purchase_items_ranch_idx").on(t.ranchId),
+    productIdx: index("fuel_purchase_items_product_idx").on(t.fuelProductId),
+  })
+);
+
+export const fuelInventoryBalances = pgTable(
+  "fuel_inventory_balances",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    fuelProductId: pgUuid("fuel_product_id").notNull(),
+    unit: text("unit").notNull(),
+    onHandQuantity: decimal("on_hand_quantity").notNull().default("0"),
+    normalizedOnHandQuantity: decimal("normalized_on_hand_quantity"),
+    normalizedUnit: text("normalized_unit"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueProductUnitIdx: uniqueIndex("fuel_inventory_balances_unique_idx").on(t.ranchId, t.fuelProductId, t.unit),
+    ranchIdx: index("fuel_inventory_balances_ranch_idx").on(t.ranchId, t.updatedAt),
+  })
+);
+
+export const fuelPhotos = pgTable(
+  "fuel_photos",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: pgUuid("entity_id").notNull(),
+    filePath: text("file_path"),
+    storageUrl: text("storage_url"),
+    originalFilename: text("original_filename"),
+    mimeType: text("mime_type"),
+    fileSize: integer("file_size"),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).defaultNow().notNull(),
+    metadataJson: jsonb("metadata_json"),
+  },
+  (t) => ({
+    ranchIdx: index("fuel_photos_ranch_idx").on(t.ranchId),
+    lookupIdx: index("fuel_photos_lookup_idx").on(t.ranchId, t.entityType, t.entityId, t.uploadedAt),
+  })
+);

@@ -1,22 +1,7 @@
-import { Card } from "@/components/ui/card";
+import { Navigate } from "react-router-dom";
+
+import { ROUTES } from "@/routes";
 
 export default function FuelPage() {
-  return (
-    <div className="p-6 space-y-6">
-
-      <header>
-        <h1 className="text-3xl font-bold text-stone-800">Fuel</h1>
-        <p className="text-stone-600 mt-1">
-          Monitor fuel storage, usage, and delivery history.
-        </p>
-      </header>
-
-      <Card title="Fuel Records">
-        <p className="text-stone-600">
-          This section will track fuel tanks, levels, and consumption logs.
-        </p>
-      </Card>
-
-    </div>
-  );
+  return <Navigate to={ROUTES.supplies.fuelProducts} replace />;
 }

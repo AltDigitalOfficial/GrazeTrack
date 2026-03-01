@@ -5,7 +5,7 @@ export default function SuppliesOverviewPage() {
   return (
     <PageShell
       title="Supplies & Consumables"
-      description="Manage feed, additives, medications, fuel, and tools used across your ranch."
+      description="Manage feed, additives, medications, fuel & fluids, and tools used across your ranch."
     >
       <FeatureGrid>
         <FeatureTileLink
@@ -25,8 +25,8 @@ export default function SuppliesOverviewPage() {
         />
         <FeatureTileLink
           to={ROUTES.supplies.fuel}
-          title="Fuel"
-          description="Monitor fuel storage, usage, and deliveries."
+          title="Fuel & Fluids"
+          description="Track fuel/fluid products, purchases, and inventory balances."
         />
         <FeatureTileLink
           to={ROUTES.supplies.tools}

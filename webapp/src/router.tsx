@@ -52,6 +52,9 @@ import FeedPurchasesPage from "./modules/supplies/pages/FeedPurchasesPage";
 import FeedInventoryPage from "./modules/supplies/pages/FeedInventoryPage";
 import AdditivesPage from "./modules/supplies/pages/AdditivesPage";
 import FuelSuppliesPage from "./modules/supplies/pages/FuelPage";
+import FuelProductsPage from "./modules/supplies/pages/FuelProductsPage";
+import FuelPurchasesPage from "./modules/supplies/pages/FuelPurchasesPage";
+import FuelInventoryPage from "./modules/supplies/pages/FuelInventoryPage";
 import ToolsSuppliesPage from "./modules/supplies/pages/ToolsPage";
 
 // Services
@@ -132,6 +135,9 @@ export const router = createBrowserRouter([
           { path: ROUTES.supplies.additives, element: <AdditivesPage /> },
           { path: ROUTES.supplies.minerals, element: <AdditivesPage /> },
           { path: ROUTES.supplies.fuel, element: <FuelSuppliesPage /> },
+          { path: ROUTES.supplies.fuelProducts, element: <FuelProductsPage /> },
+          { path: ROUTES.supplies.fuelPurchases, element: <FuelPurchasesPage /> },
+          { path: ROUTES.supplies.fuelInventory, element: <FuelInventoryPage /> },
           { path: ROUTES.supplies.tools, element: <ToolsSuppliesPage /> },
 
           { path: ROUTES.supplies.medications, element: <MedicationsOverviewPage /> },

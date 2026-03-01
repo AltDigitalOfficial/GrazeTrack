@@ -27,6 +27,7 @@ export function Sidebar() {
   const tasksActive = location.pathname.startsWith(ROUTES.tasks.root);
   const adminActive = location.pathname.startsWith(ROUTES.admin.root);
   const feedActive = location.pathname.startsWith("/supplies/feed");
+  const fuelActive = location.pathname.startsWith("/supplies/fuel");
 
   const linkClasses = ({ isActive }: { isActive: boolean }) =>
     `block px-2 py-1 rounded ${
@@ -260,9 +261,34 @@ export function Sidebar() {
                   Medications
                 </NavLink>
 
-                <NavLink to={ROUTES.supplies.fuel} className={nestedLinkClasses}>
-                  Fuel
+                <NavLink
+                  to={ROUTES.supplies.fuel}
+                  className={({ isActive }) =>
+                    `block px-2 py-1 rounded text-sm ml-4 font-semibold ${
+                      fuelActive || isActive
+                        ? "bg-green-100 text-green-800"
+                        : "text-stone-200 hover:bg-stone-600"
+                    }`
+                  }
+                >
+                  Fuel & Fluids
                 </NavLink>
+
+                {fuelActive && (
+                  <div className="space-y-1">
+                    <NavLink to={ROUTES.supplies.fuelProducts} className={subNestedLinkClasses}>
+                      Products
+                    </NavLink>
+
+                    <NavLink to={ROUTES.supplies.fuelPurchases} className={subNestedLinkClasses}>
+                      Purchases
+                    </NavLink>
+
+                    <NavLink to={ROUTES.supplies.fuelInventory} className={subNestedLinkClasses}>
+                      Inventory
+                    </NavLink>
+                  </div>
+                )}
 
                 <NavLink to={ROUTES.supplies.tools} className={nestedLinkClasses}>
                   Tools
