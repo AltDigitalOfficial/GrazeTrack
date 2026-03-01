@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { apiGet, apiPostForm } from "@/lib/api";
 import { useRanch } from "@/lib/ranchContext";
 import {
+  FuelPhotosResponseSchema,
   FuelPurchaseDetailResponseSchema,
   FuelPurchasesResponseSchema,
   FuelProductsResponseSchema,
@@ -24,11 +25,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  FeedPhotoUploader,
+  type ExistingFeedPhoto,
+  type LocalFeedPhoto,
+} from "@/modules/supplies/components/FeedPhotoUploader";
+
+type PurchasePhotoPurpose = "receipt" | "label" | "misc";
+type LocalPhotosByPurpose = Record<PurchasePhotoPurpose, LocalFeedPhoto[]>;
 
 type PurchaseDetailState = {
   purchase: FuelPurchaseListRow;
   items: FuelPurchaseItem[];
+  photos: ExistingFeedPhoto[];
 };
+
+function emptyLocalPhotos(): LocalPhotosByPurpose {
+  return { receipt: [], label: [], misc: [] };
+}
 
 function todayIsoDate(): string {
   const d = new Date();
@@ -59,7 +73,15 @@ function normalizeVolumeUnit(unit: string | null | undefined): "gal" | "l" | "qt
   if (normalized === "l" || normalized === "liter" || normalized === "liters") return "l";
   if (normalized === "qt" || normalized === "quart" || normalized === "quarts") return "qt";
   if (normalized === "pt" || normalized === "pint" || normalized === "pints") return "pt";
-  if (normalized === "oz" || normalized === "floz" || normalized === "fl_oz" || normalized === "fluidounce") return "oz";
+  if (
+    normalized === "oz" ||
+    normalized === "floz" ||
+    normalized === "fl_oz" ||
+    normalized === "fluidounce" ||
+    normalized === "fluidounces"
+  ) {
+    return "oz";
+  }
   if (normalized === "ml" || normalized === "milliliter" || normalized === "milliliters") return "ml";
   return null;
 }
@@ -102,6 +124,7 @@ export default function FuelPurchasesPage() {
   const [unitCost, setUnitCost] = useState("");
   const [totalCost, setTotalCost] = useState("");
   const [notes, setNotes] = useState("");
+  const [localPhotos, setLocalPhotos] = useState<LocalPhotosByPurpose>(emptyLocalPhotos());
 
   const canInteract = useMemo(() => !ranchLoading && !!activeRanchId && !saving, [ranchLoading, activeRanchId, saving]);
   const selectedProduct = useMemo(
@@ -110,6 +133,14 @@ export default function FuelPurchasesPage() {
   );
   const selectedUnitType = useMemo<FuelUnitType>(() => unitTypeForUi(selectedProduct?.unitType), [selectedProduct?.unitType]);
   const selectedDefaultUnit = useMemo(() => selectedProduct?.defaultUnit ?? "gal", [selectedProduct?.defaultUnit]);
+  const selectedDefaultPackageSize = useMemo(
+    () => selectedProduct?.defaultPackageSize ?? "",
+    [selectedProduct?.defaultPackageSize]
+  );
+  const selectedDefaultPackageUnit = useMemo(
+    () => selectedProduct?.defaultPackageUnit ?? "oz",
+    [selectedProduct?.defaultPackageUnit]
+  );
 
   const computedNormalizedFromPackage = useMemo(() => {
     if (selectedUnitType !== "COUNT") return null;
@@ -120,6 +151,40 @@ export default function FuelPurchasesPage() {
     if (normalizedGal === null) return null;
     return { quantity: String(normalizedGal), unit: "gal" };
   }, [packageSize, packageUnit, quantity, selectedUnitType]);
+
+  function resetLocalPhotos() {
+    for (const purpose of Object.keys(localPhotos) as PurchasePhotoPurpose[]) {
+      for (const photo of localPhotos[purpose]) {
+        URL.revokeObjectURL(photo.url);
+      }
+    }
+    setLocalPhotos(emptyLocalPhotos());
+  }
+
+  function addLocalPhotos(purpose: PurchasePhotoPurpose, files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const next: LocalFeedPhoto[] = Array.from(files).map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      url: URL.createObjectURL(file),
+      originalName: file.name,
+    }));
+    setLocalPhotos((prev) => ({
+      ...prev,
+      [purpose]: [...prev[purpose], ...next],
+    }));
+  }
+
+  function removeLocalPhoto(purpose: PurchasePhotoPurpose, photoId: string) {
+    setLocalPhotos((prev) => {
+      const photo = prev[purpose].find((p) => p.id === photoId);
+      if (photo) URL.revokeObjectURL(photo.url);
+      return {
+        ...prev,
+        [purpose]: prev[purpose].filter((p) => p.id !== photoId),
+      };
+    });
+  }
 
   function resetForm() {
     setSelectedProductId("");
@@ -134,6 +199,7 @@ export default function FuelPurchasesPage() {
     setUnitCost("");
     setTotalCost("");
     setNotes("");
+    resetLocalPhotos();
     setSaveError(null);
   }
 
@@ -168,9 +234,21 @@ export default function FuelPurchasesPage() {
   async function loadPurchaseDetail(purchaseId: string) {
     setLoadingDetail(true);
     try {
-      const raw = await apiGet(`/fuel/purchases/${encodeURIComponent(purchaseId)}`);
-      const detail = FuelPurchaseDetailResponseSchema.parse(raw);
-      setPurchaseDetail({ purchase: detail.purchase, items: detail.items });
+      const [detailRaw, photosRaw] = await Promise.all([
+        apiGet(`/fuel/purchases/${encodeURIComponent(purchaseId)}`),
+        apiGet(`/fuel/purchases/${encodeURIComponent(purchaseId)}/photos`),
+      ]);
+      const detail = FuelPurchaseDetailResponseSchema.parse(detailRaw);
+      const photos = FuelPhotosResponseSchema.parse(photosRaw).photos ?? [];
+      setPurchaseDetail({
+        purchase: detail.purchase,
+        items: detail.items,
+        photos: photos.map((photo) => ({
+          id: photo.id,
+          url: photo.url ?? null,
+          originalFilename: photo.originalFilename ?? null,
+        })),
+      });
       setSelectedPurchaseId(purchaseId);
     } catch (err: unknown) {
       setLoadError(err instanceof Error ? err.message : "Failed to load purchase details");
@@ -205,18 +283,33 @@ export default function FuelPurchasesPage() {
       fd.append("vendor", vendor.trim());
       fd.append("invoiceRef", invoiceRef.trim());
       fd.append("notes", notes.trim());
-      fd.append("items", JSON.stringify([{
-        productId: selectedProductId,
-        quantity: String(qty),
-        unit: unit.trim() || selectedDefaultUnit || "gal",
-        unitType: selectedUnitType,
-        unitCost: unitCost.trim() || null,
-        totalCost: totalCost.trim() || null,
-        packageSize: includeCountAdvanced ? packageSize.trim() : null,
-        packageUnit: includeCountAdvanced ? (packageUnit.trim() || "oz") : null,
-        normalizedQuantity: includeCountAdvanced ? (computedNormalizedFromPackage?.quantity ?? null) : null,
-        normalizedUnit: includeCountAdvanced ? (computedNormalizedFromPackage?.unit ?? null) : null,
-      }]));
+      fd.append(
+        "items",
+        JSON.stringify([
+          {
+            productId: selectedProductId,
+            quantity: String(qty),
+            unit: unit.trim() || selectedDefaultUnit || "gal",
+            unitType: selectedUnitType,
+            unitCost: unitCost.trim() || null,
+            totalCost: totalCost.trim() || null,
+            packageSize: includeCountAdvanced ? packageSize.trim() : null,
+            packageUnit: includeCountAdvanced ? (packageUnit.trim() || selectedDefaultPackageUnit || "oz") : null,
+            normalizedQuantity: includeCountAdvanced ? (computedNormalizedFromPackage?.quantity ?? null) : null,
+            normalizedUnit: includeCountAdvanced ? (computedNormalizedFromPackage?.unit ?? null) : null,
+          },
+        ])
+      );
+
+      for (const photo of localPhotos.receipt) {
+        fd.append("receipt", photo.file, photo.originalName);
+      }
+      for (const photo of localPhotos.label) {
+        fd.append("label", photo.file, photo.originalName);
+      }
+      for (const photo of localPhotos.misc) {
+        fd.append("misc", photo.file, photo.originalName);
+      }
 
       await apiPostForm("/fuel/purchases", fd);
       await loadPurchases();
@@ -235,7 +328,16 @@ export default function FuelPurchasesPage() {
 
   useEffect(() => {
     setUnit(selectedDefaultUnit);
-  }, [selectedDefaultUnit]);
+    setPackageSize(selectedDefaultPackageSize);
+    setPackageUnit(selectedDefaultPackageUnit || "oz");
+  }, [selectedDefaultPackageSize, selectedDefaultPackageUnit, selectedDefaultUnit]);
+
+  useEffect(() => {
+    return () => {
+      resetLocalPhotos();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="p-6 space-y-6">
@@ -244,10 +346,14 @@ export default function FuelPurchasesPage() {
         <p className="text-stone-600 mt-1">Record product purchases. Inventory updates automatically.</p>
       </header>
 
-      <Card title="Important"><div className="text-sm text-amber-700">Purchases cannot be edited/deleted yet.</div></Card>
+      <Card title="Important">
+        <div className="text-sm text-amber-700">Purchases cannot be edited/deleted yet.</div>
+      </Card>
 
       {!ranchLoading && !activeRanchId && (
-        <Card title="No Ranch Selected"><div className="text-sm text-stone-700">Select a ranch to record fuel/fluid purchases.</div></Card>
+        <Card title="No Ranch Selected">
+          <div className="text-sm text-stone-700">Select a ranch to record fuel/fluid purchases.</div>
+        </Card>
       )}
 
       <Card title="Create Purchase">
@@ -256,48 +362,224 @@ export default function FuelPurchasesPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="fuel-purchase-product">Product</Label>
-              <Select value={selectedProductId || "__none"} onValueChange={(v) => setSelectedProductId(v === "__none" ? "" : v)} disabled={!canInteract || loadingProducts}>
-                <SelectTrigger id="fuel-purchase-product" aria-label="Fuel purchase product selection"><SelectValue placeholder="Select product" /></SelectTrigger>
+              <Select
+                value={selectedProductId || "__none"}
+                onValueChange={(v) => setSelectedProductId(v === "__none" ? "" : v)}
+                disabled={!canInteract || loadingProducts}
+              >
+                <SelectTrigger id="fuel-purchase-product" aria-label="Fuel purchase product selection">
+                  <SelectValue placeholder="Select product" />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none">Select product</SelectItem>
-                  {products.map((row) => <SelectItem key={row.id} value={row.id}>{row.name}</SelectItem>)}
+                  {products.map((row) => (
+                    <SelectItem key={row.id} value={row.id}>
+                      {row.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2"><Label htmlFor="fuel-purchase-date">Purchase Date</Label><Input id="fuel-purchase-date" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} disabled={!canInteract} /></div>
-            <div className="space-y-2"><Label htmlFor="fuel-purchase-vendor">Vendor (optional)</Label><Input id="fuel-purchase-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} disabled={!canInteract} /></div>
-            <div className="space-y-2"><Label htmlFor="fuel-purchase-invoice">Invoice/Ref (optional)</Label><Input id="fuel-purchase-invoice" value={invoiceRef} onChange={(e) => setInvoiceRef(e.target.value)} disabled={!canInteract} /></div>
-            <div className="space-y-2"><Label htmlFor="fuel-purchase-quantity">Quantity</Label><Input id="fuel-purchase-quantity" value={quantity} onChange={(e) => setQuantity(e.target.value)} disabled={!canInteract} /></div>
+
+            <div className="space-y-2">
+              <Label htmlFor="fuel-purchase-date">Purchase Date</Label>
+              <Input
+                id="fuel-purchase-date"
+                type="date"
+                value={purchaseDate}
+                onChange={(e) => setPurchaseDate(e.target.value)}
+                disabled={!canInteract}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="fuel-purchase-vendor">Vendor (optional)</Label>
+              <Input
+                id="fuel-purchase-vendor"
+                value={vendor}
+                onChange={(e) => setVendor(e.target.value)}
+                disabled={!canInteract}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="fuel-purchase-invoice">Invoice/Ref (optional)</Label>
+              <Input
+                id="fuel-purchase-invoice"
+                value={invoiceRef}
+                onChange={(e) => setInvoiceRef(e.target.value)}
+                disabled={!canInteract}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="fuel-purchase-quantity">Quantity</Label>
+              <Input
+                id="fuel-purchase-quantity"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                disabled={!canInteract}
+              />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="fuel-purchase-unit">Unit</Label>
               {selectedUnitType === "VOLUME" ? (
                 <Select value={unit || "gal"} onValueChange={setUnit} disabled={!canInteract}>
-                  <SelectTrigger id="fuel-purchase-unit" aria-label="Fuel purchase unit"><SelectValue placeholder="Select unit" /></SelectTrigger>
-                  <SelectContent><SelectItem value="gal">gal</SelectItem><SelectItem value="l">L</SelectItem><SelectItem value="qt">qt</SelectItem><SelectItem value="pt">pt</SelectItem><SelectItem value="oz">oz</SelectItem><SelectItem value="ml">ml</SelectItem></SelectContent>
+                  <SelectTrigger id="fuel-purchase-unit" aria-label="Fuel purchase unit">
+                    <SelectValue placeholder="Select unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gal">gal</SelectItem>
+                    <SelectItem value="l">L</SelectItem>
+                    <SelectItem value="qt">qt</SelectItem>
+                    <SelectItem value="pt">pt</SelectItem>
+                    <SelectItem value="oz">oz</SelectItem>
+                    <SelectItem value="ml">ml</SelectItem>
+                  </SelectContent>
                 </Select>
-              ) : (<Input id="fuel-purchase-unit" value={unit} onChange={(e) => setUnit(e.target.value)} disabled={!canInteract} />)}
+              ) : (
+                <Input
+                  id="fuel-purchase-unit"
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value)}
+                  disabled={!canInteract}
+                />
+              )}
               <div className="text-xs text-muted-foreground">Unit type: {selectedUnitType}</div>
             </div>
-            <div className="space-y-2"><Label htmlFor="fuel-purchase-unit-cost">Unit cost (optional)</Label><Input id="fuel-purchase-unit-cost" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} disabled={!canInteract} /></div>
-            <div className="space-y-2"><Label htmlFor="fuel-purchase-total-cost">Total cost (optional)</Label><Input id="fuel-purchase-total-cost" value={totalCost} onChange={(e) => setTotalCost(e.target.value)} disabled={!canInteract} /></div>
-            <div className="space-y-2 md:col-span-2"><Label htmlFor="fuel-purchase-notes">Notes (optional)</Label><Textarea id="fuel-purchase-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} disabled={!canInteract} /></div>
+
+            <div className="space-y-2">
+              <Label htmlFor="fuel-purchase-unit-cost">Unit cost (optional)</Label>
+              <Input
+                id="fuel-purchase-unit-cost"
+                value={unitCost}
+                onChange={(e) => setUnitCost(e.target.value)}
+                disabled={!canInteract}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="fuel-purchase-total-cost">Total cost (optional)</Label>
+              <Input
+                id="fuel-purchase-total-cost"
+                value={totalCost}
+                onChange={(e) => setTotalCost(e.target.value)}
+                disabled={!canInteract}
+              />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="fuel-purchase-notes">Notes (optional)</Label>
+              <Textarea
+                id="fuel-purchase-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                disabled={!canInteract}
+              />
+            </div>
           </div>
 
           <div className="rounded-md border p-3 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-medium text-stone-800">Advanced (optional)</div>
-              <Button type="button" variant="outline" size="sm" onClick={() => setShowAdvanced((prev) => !prev)} aria-label="Toggle advanced fuel purchase fields" disabled={!canInteract}>{showAdvanced ? "Hide Advanced" : "Show Advanced"}</Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAdvanced((prev) => !prev)}
+                aria-label="Toggle advanced fuel purchase fields"
+                disabled={!canInteract}
+              >
+                {showAdvanced ? "Hide Advanced" : "Show Advanced"}
+              </Button>
             </div>
             {showAdvanced && selectedUnitType === "COUNT" && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2"><Label htmlFor="fuel-purchase-package-size">Package size (optional)</Label><Input id="fuel-purchase-package-size" value={packageSize} onChange={(e) => setPackageSize(e.target.value)} disabled={!canInteract} placeholder="14" /></div>
-                <div className="space-y-2"><Label htmlFor="fuel-purchase-package-unit">Package unit</Label><Input id="fuel-purchase-package-unit" value={packageUnit} onChange={(e) => setPackageUnit(e.target.value)} disabled={!canInteract} placeholder="oz" /></div>
+                <div className="space-y-2">
+                  <Label htmlFor="fuel-purchase-package-size">Package size (optional)</Label>
+                  <Input
+                    id="fuel-purchase-package-size"
+                    value={packageSize}
+                    onChange={(e) => setPackageSize(e.target.value)}
+                    disabled={!canInteract}
+                    placeholder="14"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fuel-purchase-package-unit">Package unit</Label>
+                  <Input
+                    id="fuel-purchase-package-unit"
+                    value={packageUnit}
+                    onChange={(e) => setPackageUnit(e.target.value)}
+                    disabled={!canInteract}
+                    placeholder="oz"
+                  />
+                </div>
               </div>
             )}
-            {showAdvanced && <div className="text-xs text-muted-foreground">{computedNormalizedFromPackage ? `Normalized estimate: ${computedNormalizedFromPackage.quantity} ${computedNormalizedFromPackage.unit}` : "No normalized preview available."}</div>}
+            {showAdvanced && (
+              <div className="text-xs text-muted-foreground">
+                {computedNormalizedFromPackage
+                  ? `Normalized estimate: ${computedNormalizedFromPackage.quantity} ${computedNormalizedFromPackage.unit}`
+                  : "No normalized preview available."}
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center justify-end gap-3"><Button type="button" variant="outline" onClick={resetForm} disabled={!canInteract}>Reset</Button><Button type="submit" disabled={!canInteract}>{saving ? "Saving..." : "Create Purchase"}</Button></div>
+          <div className="space-y-6">
+            <FeedPhotoUploader
+              id="fuel-purchase-receipt"
+              title="Receipt Photos"
+              description="Upload receipt/invoice photos."
+              ariaLabel="Fuel purchase receipt upload"
+              existingPhotos={[]}
+              markedForDelete={new Set()}
+              localPhotos={localPhotos.receipt}
+              disabled={!canInteract}
+              onAddFiles={(files) => addLocalPhotos("receipt", files)}
+              onRemoveLocal={(photoId) => removeLocalPhoto("receipt", photoId)}
+              onToggleDeleteExisting={() => {}}
+            />
+
+            <FeedPhotoUploader
+              id="fuel-purchase-label"
+              title="Label Photos"
+              description="Upload product label/packaging photos."
+              ariaLabel="Fuel purchase label upload"
+              existingPhotos={[]}
+              markedForDelete={new Set()}
+              localPhotos={localPhotos.label}
+              disabled={!canInteract}
+              onAddFiles={(files) => addLocalPhotos("label", files)}
+              onRemoveLocal={(photoId) => removeLocalPhoto("label", photoId)}
+              onToggleDeleteExisting={() => {}}
+            />
+
+            <FeedPhotoUploader
+              id="fuel-purchase-misc"
+              title="Misc Photos"
+              description="Optional extra photos."
+              ariaLabel="Fuel purchase misc upload"
+              existingPhotos={[]}
+              markedForDelete={new Set()}
+              localPhotos={localPhotos.misc}
+              disabled={!canInteract}
+              onAddFiles={(files) => addLocalPhotos("misc", files)}
+              onRemoveLocal={(photoId) => removeLocalPhoto("misc", photoId)}
+              onToggleDeleteExisting={() => {}}
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-3">
+            <Button type="button" variant="outline" onClick={resetForm} disabled={!canInteract}>
+              Reset
+            </Button>
+            <Button type="submit" disabled={!canInteract}>
+              {saving ? "Saving..." : "Create Purchase"}
+            </Button>
+          </div>
         </form>
       </Card>
 
@@ -305,13 +587,37 @@ export default function FuelPurchasesPage() {
         <div className="space-y-3 p-4">
           {loadError && <div className="text-sm text-red-600">{loadError}</div>}
           <div className="border rounded-md overflow-hidden">
-            <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs font-semibold text-stone-600 bg-stone-50"><div className="col-span-3">Date</div><div className="col-span-3">Vendor</div><div className="col-span-2">Items</div><div className="col-span-2">Total</div><div className="col-span-2 text-right">Action</div></div>
-            {loadingPurchases ? <div className="px-3 py-8 text-sm text-stone-500 text-center">Loading...</div> : purchases.length === 0 ? <div className="px-3 py-8 text-sm text-stone-500 text-center">No fuel/fluid purchases recorded yet.</div> : (
+            <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs font-semibold text-stone-600 bg-stone-50">
+              <div className="col-span-3">Date</div>
+              <div className="col-span-3">Vendor</div>
+              <div className="col-span-2">Items</div>
+              <div className="col-span-2">Total</div>
+              <div className="col-span-2 text-right">Action</div>
+            </div>
+            {loadingPurchases ? (
+              <div className="px-3 py-8 text-sm text-stone-500 text-center">Loading...</div>
+            ) : purchases.length === 0 ? (
+              <div className="px-3 py-8 text-sm text-stone-500 text-center">No fuel/fluid purchases recorded yet.</div>
+            ) : (
               <div className="divide-y">
                 {purchases.map((purchase) => (
                   <div key={purchase.id} className="grid grid-cols-12 gap-2 px-3 py-3 text-sm items-center">
-                    <div className="col-span-3 text-stone-800">{purchase.purchaseDate}</div><div className="col-span-3 text-stone-700">{purchase.vendor ?? "-"}</div><div className="col-span-2 text-stone-700">{purchase.itemCount ?? 0}</div><div className="col-span-2 text-stone-700">{purchase.totalCost ?? "0"}</div>
-                    <div className="col-span-2 flex justify-end"><Button type="button" variant={selectedPurchaseId === purchase.id ? "default" : "outline"} size="sm" onClick={() => loadPurchaseDetail(purchase.id)} disabled={!canInteract} aria-label={`View purchase ${purchase.id}`}>View</Button></div>
+                    <div className="col-span-3 text-stone-800">{purchase.purchaseDate}</div>
+                    <div className="col-span-3 text-stone-700">{purchase.vendor ?? "-"}</div>
+                    <div className="col-span-2 text-stone-700">{purchase.itemCount ?? 0}</div>
+                    <div className="col-span-2 text-stone-700">{purchase.totalCost ?? "0"}</div>
+                    <div className="col-span-2 flex justify-end">
+                      <Button
+                        type="button"
+                        variant={selectedPurchaseId === purchase.id ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => loadPurchaseDetail(purchase.id)}
+                        disabled={!canInteract}
+                        aria-label={`View purchase ${purchase.id}`}
+                      >
+                        View
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -320,28 +626,83 @@ export default function FuelPurchasesPage() {
         </div>
       </Card>
 
-      {loadingDetail && <Card title="Purchase Detail"><div className="p-4 text-sm text-stone-500">Loading purchase detail...</div></Card>}
+      {loadingDetail && (
+        <Card title="Purchase Detail">
+          <div className="p-4 text-sm text-stone-500">Loading purchase detail...</div>
+        </Card>
+      )}
       {purchaseDetail && !loadingDetail && (
         <Card title="Purchase Detail">
           <div className="space-y-4 p-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-              <div><div className="text-xs text-stone-500">Purchase Date</div><div className="text-stone-800">{purchaseDetail.purchase.purchaseDate}</div></div>
-              <div><div className="text-xs text-stone-500">Vendor</div><div className="text-stone-800">{purchaseDetail.purchase.vendor ?? "-"}</div></div>
-              <div><div className="text-xs text-stone-500">Invoice Ref</div><div className="text-stone-800">{purchaseDetail.purchase.invoiceRef ?? "-"}</div></div>
+              <div>
+                <div className="text-xs text-stone-500">Purchase Date</div>
+                <div className="text-stone-800">{purchaseDetail.purchase.purchaseDate}</div>
+              </div>
+              <div>
+                <div className="text-xs text-stone-500">Vendor</div>
+                <div className="text-stone-800">{purchaseDetail.purchase.vendor ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-xs text-stone-500">Invoice Ref</div>
+                <div className="text-stone-800">{purchaseDetail.purchase.invoiceRef ?? "-"}</div>
+              </div>
             </div>
             <div className="border rounded-md overflow-hidden">
-              <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs font-semibold text-stone-600 bg-stone-50"><div className="col-span-4">Product</div><div className="col-span-2">Unit Type</div><div className="col-span-2">Qty / Unit</div><div className="col-span-2">Normalized</div><div className="col-span-2">Cost</div></div>
+              <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs font-semibold text-stone-600 bg-stone-50">
+                <div className="col-span-4">Product</div>
+                <div className="col-span-2">Unit Type</div>
+                <div className="col-span-2">Qty / Unit</div>
+                <div className="col-span-2">Normalized</div>
+                <div className="col-span-2">Cost</div>
+              </div>
               <div className="divide-y">
                 {purchaseDetail.items.map((item) => (
                   <div key={item.id} className="grid grid-cols-12 gap-2 px-3 py-3 text-sm">
-                    <div className="col-span-4 text-stone-800">{item.productName ?? "-"}</div><div className="col-span-2 text-stone-700">{unitTypeForUi(item.unitType)}</div>
-                    <div className="col-span-2 text-stone-700">{item.quantity} {item.unit}</div>
-                    <div className="col-span-2 text-stone-700">{item.normalizedQuantity && item.normalizedUnit ? `${item.normalizedQuantity} ${item.normalizedUnit}` : "-"}</div>
-                    <div className="col-span-2 text-stone-700">{item.totalCost ?? (item.unitCost ? `${item.unitCost} / unit` : "-")}</div>
+                    <div className="col-span-4 text-stone-800">{item.productName ?? "-"}</div>
+                    <div className="col-span-2 text-stone-700">{unitTypeForUi(item.unitType)}</div>
+                    <div className="col-span-2 text-stone-700">
+                      {item.quantity} {item.unit}
+                    </div>
+                    <div className="col-span-2 text-stone-700">
+                      {item.normalizedQuantity && item.normalizedUnit
+                        ? `${item.normalizedQuantity} ${item.normalizedUnit}`
+                        : "-"}
+                    </div>
+                    <div className="col-span-2 text-stone-700">
+                      {item.totalCost ?? (item.unitCost ? `${item.unitCost} / unit` : "-")}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
+
+            {purchaseDetail.photos.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-stone-800">Photos</div>
+                <div className="max-h-80 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                    {purchaseDetail.photos.map((photo) => (
+                      <div key={photo.id} className="rounded-md border overflow-hidden bg-white">
+                        <div className="aspect-square bg-stone-50 flex items-center justify-center">
+                          {photo.url ? (
+                            <img
+                              src={photo.url}
+                              alt={photo.originalFilename || "Purchase photo"}
+                              loading="lazy"
+                              decoding="async"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-xs text-stone-500">No preview</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
       )}
