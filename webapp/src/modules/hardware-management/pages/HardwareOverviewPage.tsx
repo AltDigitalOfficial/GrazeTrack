@@ -5,26 +5,26 @@ export default function HardwareOverviewPage() {
   return (
     <PageShell
       title="Hardware Management"
-      description="Track and manage ranch vehicles, tractors, and equipment assets."
+      description="Track and manage ranch hard assets and maintenance history."
     >
       <FeatureGrid>
         <FeatureTileLink
-          to={ROUTES.hardware.vehicles}
-          title="Vehicles"
-          description="Manage trucks, ATVs, UTVs, and other ranch vehicles."
+          to={ROUTES.hardware.assetsOverview}
+          title="Assets Overview"
+          description="Review all hard assets with filters and value/maintenance context."
         />
         <FeatureTileLink
-          to={ROUTES.hardware.tractors}
-          title="Tractors"
-          description="Track tractors, implements, and maintenance schedules."
+          to={ROUTES.hardware.maintenanceLog}
+          title="Maintenance Log"
+          description="Review and edit maintenance events across all assets."
         />
         <FeatureTileDisabled
-          title="IoT Devices (Coming Soon)"
-          description="Monitor sensors, cameras, and connected ranch hardware."
+          title="Asset History Report (Coming Soon)"
+          description="Generate timeline-style hardware history for valuation and audits."
         />
         <FeatureTileDisabled
-          title="Equipment Health (Coming Soon)"
-          description="Track maintenance intervals, repairs, and operational readiness."
+          title="Documents View (Coming Soon)"
+          description="Review manuals, warranties, and receipts across assets."
         />
       </FeatureGrid>
     </PageShell>

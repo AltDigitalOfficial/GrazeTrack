@@ -21,7 +21,7 @@ export function Sidebar() {
   // Active section detection (match ROUTES prefixes)
   const herdActive = location.pathname.startsWith(ROUTES.herd.root);
   const landActive = location.pathname.startsWith(ROUTES.land.root);
-  const hardwareActive = location.pathname.startsWith(ROUTES.hardware.root);
+  const hardwareActive = location.pathname.startsWith("/hardware");
   const suppliesActive = location.pathname.startsWith(ROUTES.supplies.root);
   const servicesActive = location.pathname.startsWith(ROUTES.services.root);
   const tasksActive = location.pathname.startsWith(ROUTES.tasks.root);
@@ -195,12 +195,12 @@ export function Sidebar() {
 
             {hardwareActive && (
               <div className="mt-1 space-y-1">
-                <NavLink to={ROUTES.hardware.vehicles} className={nestedLinkClasses}>
-                  Vehicles
+                <NavLink to={ROUTES.hardware.assetsOverview} className={nestedLinkClasses}>
+                  Assets Overview
                 </NavLink>
 
-                <NavLink to={ROUTES.hardware.tractors} className={nestedLinkClasses}>
-                  Tractors
+                <NavLink to={ROUTES.hardware.maintenanceLog} className={nestedLinkClasses}>
+                  Maintenance Log
                 </NavLink>
               </div>
             )}

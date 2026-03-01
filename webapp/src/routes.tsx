@@ -38,9 +38,9 @@ export const ROUTES = {
   },
 
   hardware: {
-    root: "/hardware",
-    vehicles: "/hardware/vehicles",
-    tractors: "/hardware/tractors",
+    root: "/hardware/assets",
+    assetsOverview: "/hardware/assets",
+    maintenanceLog: "/hardware/maintenance",
   },
 
   supplies: {

@@ -31,10 +31,11 @@ type EquipmentAssetType =
   | "PUMP"
   | "OTHER";
 
-type EquipmentAssetStatus = "ACTIVE" | "SOLD" | "RETIRED" | "LOST" | "RENTED" | "LEASED";
+type EquipmentAssetStatus = "ACTIVE" | "DISABLED" | "SOLD" | "RETIRED" | "LOST" | "RENTED" | "LEASED";
 type EquipmentAcquisitionType = "PURCHASED" | "LEASED" | "RENTED" | "INHERITED" | "OTHER";
 type EquipmentMeterType = "NONE" | "HOURS" | "MILES" | "OTHER";
 type EquipmentMaintenanceEventType = "SERVICE" | "REPAIR" | "INSPECTION" | "MODIFICATION" | "WARRANTY" | "OTHER";
+type EquipmentPerformedBy = "OWNER" | "EMPLOYEE" | "CONTRACTOR" | "DEALER" | "UNKNOWN";
 type EquipmentPartCategory =
   | "FENCING"
   | "HARDWARE"
@@ -68,7 +69,7 @@ const ASSET_TYPES = new Set<EquipmentAssetType>([
   "PUMP",
   "OTHER",
 ]);
-const ASSET_STATUSES = new Set<EquipmentAssetStatus>(["ACTIVE", "SOLD", "RETIRED", "LOST", "RENTED", "LEASED"]);
+const ASSET_STATUSES = new Set<EquipmentAssetStatus>(["ACTIVE", "DISABLED", "SOLD", "RETIRED", "LOST", "RENTED", "LEASED"]);
 const ACQUISITION_TYPES = new Set<EquipmentAcquisitionType>(["PURCHASED", "LEASED", "RENTED", "INHERITED", "OTHER"]);
 const METER_TYPES = new Set<EquipmentMeterType>(["NONE", "HOURS", "MILES", "OTHER"]);
 const MAINTENANCE_EVENT_TYPES = new Set<EquipmentMaintenanceEventType>([
@@ -79,6 +80,7 @@ const MAINTENANCE_EVENT_TYPES = new Set<EquipmentMaintenanceEventType>([
   "WARRANTY",
   "OTHER",
 ]);
+const PERFORMED_BY_TYPES = new Set<EquipmentPerformedBy>(["OWNER", "EMPLOYEE", "CONTRACTOR", "DEALER", "UNKNOWN"]);
 const PART_CATEGORIES = new Set<EquipmentPartCategory>([
   "FENCING",
   "HARDWARE",
@@ -195,6 +197,18 @@ function toBooleanLike(value: unknown, fallback = false): boolean {
     if (normalized === "false" || normalized === "0") return false;
   }
   return fallback;
+}
+
+function toBooleanOrNull(value: unknown): boolean | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized.length) return null;
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0") return false;
+  }
+  throw appError(400, "Boolean filter value must be true or false.");
 }
 
 function normalizeBody(raw: Record<string, any>): Record<string, any> {
@@ -529,11 +543,43 @@ async function getAssetDetail(ranchId: string, assetId: string) {
 
 const RanchScopedQuerySchema = z.object({ ranchId: z.string().uuid().optional().nullable() });
 const UuidParamSchema = z.object({ id: z.string().uuid() });
+const QueryPageSchema = z
+  .union([z.string(), z.number()])
+  .optional()
+  .nullable()
+  .transform((value) => {
+    if (value === null || value === undefined || value === "") return 1;
+    const n = Number(value);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) throw appError(400, "page must be a positive integer.");
+    return n;
+  });
+const QueryLimitSchema = z
+  .union([z.string(), z.number()])
+  .optional()
+  .nullable()
+  .transform((value) => {
+    if (value === null || value === undefined || value === "") return 50;
+    const n = Number(value);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) throw appError(400, "limit must be a positive integer.");
+    return Math.min(200, n);
+  });
 
 const EquipmentAssetListQuerySchema = RanchScopedQuerySchema.extend({
+  type: z.string().optional().nullable(),
   assetType: z.string().optional().nullable(),
   status: z.string().optional().nullable(),
+  acquisitionType: z.string().optional().nullable(),
+  dateFrom: z.string().optional().nullable(),
+  dateTo: z.string().optional().nullable(),
+  yearFrom: z.union([z.string(), z.number()]).optional().nullable(),
+  yearTo: z.union([z.string(), z.number()]).optional().nullable(),
+  trackMaintenance: z.union([z.string(), z.boolean()]).optional().nullable(),
+  make: z.string().optional().nullable(),
+  model: z.string().optional().nullable(),
   search: z.string().optional().nullable(),
+  sort: z.string().optional().nullable(),
+  page: QueryPageSchema,
+  limit: QueryLimitSchema,
 });
 
 const IdentifierInputSchema = z.object({
@@ -570,6 +616,9 @@ const EquipmentMaintenanceBodySchema = z.object({
   title: z.string().min(1),
   description: z.string().optional().nullable(),
   provider: z.string().optional().nullable(),
+  performedBy: z.string().optional().nullable(),
+  hasInvoice: z.union([z.boolean(), z.string()]).optional().nullable(),
+  downtimeHours: z.union([z.string(), z.number()]).optional().nullable(),
   laborCost: z.union([z.string(), z.number()]).optional().nullable(),
   partsCost: z.union([z.string(), z.number()]).optional().nullable(),
   totalCost: z.union([z.string(), z.number()]).optional().nullable(),
@@ -581,6 +630,20 @@ const EquipmentMaintenanceBodySchema = z.object({
 
 const EquipmentMaintenanceUpdateBodySchema = EquipmentMaintenanceBodySchema.partial().extend({
   removeAttachmentIds: z.array(z.string().uuid()).optional(),
+});
+
+const EquipmentMaintenanceListQuerySchema = RanchScopedQuerySchema.extend({
+  type: z.string().optional().nullable(),
+  assetType: z.string().optional().nullable(),
+  eventType: z.string().optional().nullable(),
+  provider: z.string().optional().nullable(),
+  search: z.string().optional().nullable(),
+  dateFrom: z.string().optional().nullable(),
+  dateTo: z.string().optional().nullable(),
+  diyOnly: z.union([z.boolean(), z.string()]).optional().nullable(),
+  sort: z.string().optional().nullable(),
+  page: QueryPageSchema,
+  limit: QueryLimitSchema,
 });
 
 const EquipmentPartsListQuerySchema = RanchScopedQuerySchema.extend({
@@ -645,10 +708,14 @@ export async function equipmentRoutes(app: FastifyInstance) {
       const query = EquipmentAssetListQuerySchema.parse(req.query ?? {});
       const ranchId = await resolveRanchId(req.auth!.userId, query.ranchId ?? null);
       if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      const page = query.page ?? 1;
+      const limit = query.limit ?? 50;
+      const offset = (page - 1) * limit;
 
       const whereParts = [eq(equipmentAssets.ranchId, ranchId)] as any[];
-      if (query.assetType?.trim()) {
-        const assetType = normalizeEnum(query.assetType, ASSET_TYPES);
+      const requestedAssetType = query.assetType?.trim() ? query.assetType : query.type;
+      if (requestedAssetType?.trim()) {
+        const assetType = normalizeEnum(requestedAssetType, ASSET_TYPES);
         if (!assetType) return reply.status(400).send({ error: "Invalid assetType filter" });
         whereParts.push(eq(equipmentAssets.assetType, assetType));
       }
@@ -656,6 +723,33 @@ export async function equipmentRoutes(app: FastifyInstance) {
         const status = normalizeEnum(query.status, ASSET_STATUSES);
         if (!status) return reply.status(400).send({ error: "Invalid status filter" });
         whereParts.push(eq(equipmentAssets.status, status));
+      }
+      if (query.acquisitionType?.trim()) {
+        const acquisitionType = normalizeEnum(query.acquisitionType, ACQUISITION_TYPES);
+        if (!acquisitionType) return reply.status(400).send({ error: "Invalid acquisitionType filter" });
+        whereParts.push(eq(equipmentAssets.acquisitionType, acquisitionType));
+      }
+      if (query.trackMaintenance !== undefined && query.trackMaintenance !== null && String(query.trackMaintenance).trim().length) {
+        const trackMaintenanceFilter = toBooleanOrNull(query.trackMaintenance);
+        if (trackMaintenanceFilter !== null) {
+          whereParts.push(eq(equipmentAssets.trackMaintenance, trackMaintenanceFilter));
+        }
+      }
+      const dateFrom = parseIsoDateOrNull(query.dateFrom, "dateFrom");
+      const dateTo = parseIsoDateOrNull(query.dateTo, "dateTo");
+      if (dateFrom) whereParts.push(sql`${equipmentAssets.acquisitionDate} >= ${dateFrom}`);
+      if (dateTo) whereParts.push(sql`${equipmentAssets.acquisitionDate} <= ${dateTo}`);
+      const yearFrom = toNullableInteger(query.yearFrom, { allowZero: false, fieldLabel: "yearFrom" });
+      const yearTo = toNullableInteger(query.yearTo, { allowZero: false, fieldLabel: "yearTo" });
+      if (yearFrom !== null) whereParts.push(sql`${equipmentAssets.modelYear} >= ${yearFrom}`);
+      if (yearTo !== null) whereParts.push(sql`${equipmentAssets.modelYear} <= ${yearTo}`);
+      if (query.make?.trim()) {
+        const make = `%${query.make.trim()}%`;
+        whereParts.push(sql`COALESCE(${equipmentAssets.make}, '') ILIKE ${make}`);
+      }
+      if (query.model?.trim()) {
+        const model = `%${query.model.trim()}%`;
+        whereParts.push(sql`COALESCE(${equipmentAssets.model}, '') ILIKE ${model}`);
       }
       if (query.search?.trim()) {
         const search = `%${query.search.trim()}%`;
@@ -667,16 +761,229 @@ export async function equipmentRoutes(app: FastifyInstance) {
           )`
         );
       }
+      const whereClause = whereParts.length > 1 ? and(...whereParts) : whereParts[0];
+      const sort = (query.sort ?? "NAME_ASC").trim().toUpperCase();
+      let orderByClauses: any[] = [asc(equipmentAssets.name), asc(equipmentAssets.createdAt)];
+      if (sort === "NAME_DESC") orderByClauses = [desc(equipmentAssets.name), desc(equipmentAssets.createdAt)];
+      else if (sort === "ACQUIRED_DATE_ASC") orderByClauses = [asc(equipmentAssets.acquisitionDate), asc(equipmentAssets.name)];
+      else if (sort === "ACQUIRED_DATE_DESC") orderByClauses = [desc(equipmentAssets.acquisitionDate), asc(equipmentAssets.name)];
+      else if (sort === "UPDATED_DESC") orderByClauses = [desc(equipmentAssets.updatedAt), asc(equipmentAssets.name)];
+      else if (sort === "CREATED_DESC") orderByClauses = [desc(equipmentAssets.createdAt), asc(equipmentAssets.name)];
 
-      const rows = await db
-        .select()
-        .from(equipmentAssets)
-        .where(whereParts.length > 1 ? and(...whereParts) : whereParts[0])
-        .orderBy(asc(equipmentAssets.name), asc(equipmentAssets.createdAt));
+      const [rows, countRows] = await Promise.all([
+        db.select().from(equipmentAssets).where(whereClause).orderBy(...orderByClauses).limit(limit).offset(offset),
+        db.select({ count: sql<string>`count(*)` }).from(equipmentAssets).where(whereClause),
+      ]);
+      const total = Number(countRows[0]?.count ?? 0);
+      const assetIds = rows.map((row) => row.id);
 
-      return reply.send({ assets: rows });
+      const lastEventByAssetId: Record<string, string | null> = {};
+      const nextDueByAssetId: Record<string, { nextDueDate: string | null; nextDueMeter: string | null }> = {};
+      const maintenanceCountByAssetId: Record<string, number> = {};
+      const attachmentCountByAssetId: Record<string, number> = {};
+
+      if (assetIds.length > 0) {
+        const [lastRows, nextDueRows, maintenanceCountRows, attachmentCountRows] = await Promise.all([
+          db
+            .select({ assetId: equipmentMaintenanceEvents.assetId, lastEventDate: sql<string>`max(${equipmentMaintenanceEvents.eventDate})` })
+            .from(equipmentMaintenanceEvents)
+            .where(and(eq(equipmentMaintenanceEvents.ranchId, ranchId), inArray(equipmentMaintenanceEvents.assetId, assetIds)))
+            .groupBy(equipmentMaintenanceEvents.assetId),
+          db
+            .select({
+              assetId: equipmentMaintenanceEvents.assetId,
+              nextDueDate: equipmentMaintenanceEvents.nextDueDate,
+              nextDueMeter: equipmentMaintenanceEvents.nextDueMeter,
+            })
+            .from(equipmentMaintenanceEvents)
+            .where(
+              and(
+                eq(equipmentMaintenanceEvents.ranchId, ranchId),
+                inArray(equipmentMaintenanceEvents.assetId, assetIds),
+                sql`${equipmentMaintenanceEvents.nextDueDate} IS NOT NULL`
+              )
+            )
+            .orderBy(
+              asc(equipmentMaintenanceEvents.assetId),
+              asc(equipmentMaintenanceEvents.nextDueDate),
+              desc(equipmentMaintenanceEvents.createdAt)
+            ),
+          db
+            .select({ assetId: equipmentMaintenanceEvents.assetId, count: sql<string>`count(*)` })
+            .from(equipmentMaintenanceEvents)
+            .where(and(eq(equipmentMaintenanceEvents.ranchId, ranchId), inArray(equipmentMaintenanceEvents.assetId, assetIds)))
+            .groupBy(equipmentMaintenanceEvents.assetId),
+          db
+            .select({ entityId: attachments.entityId, count: sql<string>`count(*)` })
+            .from(attachments)
+            .where(and(eq(attachments.ranchId, ranchId), eq(attachments.entityType, "EQUIPMENT_ASSET"), inArray(attachments.entityId, assetIds)))
+            .groupBy(attachments.entityId),
+        ]);
+
+        for (const row of lastRows) {
+          lastEventByAssetId[row.assetId] = row.lastEventDate ?? null;
+        }
+        for (const row of nextDueRows) {
+          if (!nextDueByAssetId[row.assetId]) {
+            nextDueByAssetId[row.assetId] = {
+              nextDueDate: row.nextDueDate ?? null,
+              nextDueMeter: row.nextDueMeter ?? null,
+            };
+          }
+        }
+        for (const row of maintenanceCountRows) {
+          maintenanceCountByAssetId[row.assetId] = Number(row.count ?? 0);
+        }
+        for (const row of attachmentCountRows) {
+          attachmentCountByAssetId[row.entityId] = Number(row.count ?? 0);
+        }
+      }
+
+      const assets = rows.map((row) => ({
+        ...row,
+        lastEventDate: lastEventByAssetId[row.id] ?? null,
+        nextDueDate: nextDueByAssetId[row.id]?.nextDueDate ?? null,
+        nextDueMeter: nextDueByAssetId[row.id]?.nextDueMeter ?? null,
+        maintenanceEventCount: maintenanceCountByAssetId[row.id] ?? 0,
+        attachmentCount: attachmentCountByAssetId[row.id] ?? 0,
+      }));
+
+      return reply.send({ assets, pagination: { page, limit, total } });
     } catch (err) {
       return withErrorHandling(req, reply, err, "Failed to list equipment assets", "Failed to list equipment assets");
+    }
+  });
+
+  app.get("/equipment/maintenance", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const query = EquipmentMaintenanceListQuerySchema.parse(req.query ?? {});
+      const ranchId = await resolveRanchId(req.auth!.userId, query.ranchId ?? null);
+      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      const page = query.page ?? 1;
+      const limit = query.limit ?? 50;
+      const offset = (page - 1) * limit;
+
+      const whereParts = [eq(equipmentMaintenanceEvents.ranchId, ranchId), eq(equipmentAssets.ranchId, ranchId)] as any[];
+      const requestedAssetType = query.assetType?.trim() ? query.assetType : query.type;
+      if (requestedAssetType?.trim()) {
+        const assetType = normalizeEnum(requestedAssetType, ASSET_TYPES);
+        if (!assetType) return reply.status(400).send({ error: "Invalid assetType filter" });
+        whereParts.push(eq(equipmentAssets.assetType, assetType));
+      }
+      if (query.eventType?.trim()) {
+        const eventType = normalizeEnum(query.eventType, MAINTENANCE_EVENT_TYPES);
+        if (!eventType) return reply.status(400).send({ error: "Invalid eventType filter" });
+        whereParts.push(eq(equipmentMaintenanceEvents.eventType, eventType));
+      }
+      const dateFrom = parseIsoDateOrNull(query.dateFrom, "dateFrom");
+      const dateTo = parseIsoDateOrNull(query.dateTo, "dateTo");
+      if (dateFrom) whereParts.push(sql`${equipmentMaintenanceEvents.eventDate} >= ${dateFrom}`);
+      if (dateTo) whereParts.push(sql`${equipmentMaintenanceEvents.eventDate} <= ${dateTo}`);
+      if (query.provider?.trim()) {
+        const provider = `%${query.provider.trim()}%`;
+        whereParts.push(sql`COALESCE(${equipmentMaintenanceEvents.provider}, '') ILIKE ${provider}`);
+      }
+      if (toBooleanOrNull(query.diyOnly)) {
+        whereParts.push(
+          sql`(
+            COALESCE(${equipmentMaintenanceEvents.provider}, '') = ''
+            OR ${equipmentMaintenanceEvents.performedBy} IN ('OWNER', 'EMPLOYEE')
+          )`
+        );
+      }
+      if (query.search?.trim()) {
+        const search = `%${query.search.trim()}%`;
+        whereParts.push(
+          sql`(
+            ${equipmentMaintenanceEvents.title} ILIKE ${search}
+            OR COALESCE(${equipmentMaintenanceEvents.description}, '') ILIKE ${search}
+            OR COALESCE(${equipmentMaintenanceEvents.provider}, '') ILIKE ${search}
+            OR ${equipmentAssets.name} ILIKE ${search}
+            OR COALESCE(${equipmentAssets.make}, '') ILIKE ${search}
+            OR COALESCE(${equipmentAssets.model}, '') ILIKE ${search}
+          )`
+        );
+      }
+
+      const whereClause = whereParts.length > 1 ? and(...whereParts) : whereParts[0];
+      const sort = (query.sort ?? "DATE_DESC").trim().toUpperCase();
+      let orderByClauses: any[] = [desc(equipmentMaintenanceEvents.eventDate), desc(equipmentMaintenanceEvents.createdAt)];
+      if (sort === "DATE_ASC") orderByClauses = [asc(equipmentMaintenanceEvents.eventDate), desc(equipmentMaintenanceEvents.createdAt)];
+      else if (sort === "ASSET_ASC") orderByClauses = [asc(equipmentAssets.name), desc(equipmentMaintenanceEvents.eventDate)];
+      else if (sort === "ASSET_DESC") orderByClauses = [desc(equipmentAssets.name), desc(equipmentMaintenanceEvents.eventDate)];
+      else if (sort === "UPDATED_DESC") orderByClauses = [desc(equipmentMaintenanceEvents.updatedAt), desc(equipmentMaintenanceEvents.eventDate)];
+      else if (sort === "CREATED_DESC") orderByClauses = [desc(equipmentMaintenanceEvents.createdAt), desc(equipmentMaintenanceEvents.eventDate)];
+
+      const [rows, countRows] = await Promise.all([
+        db
+          .select({
+            id: equipmentMaintenanceEvents.id,
+            assetId: equipmentMaintenanceEvents.assetId,
+            ranchId: equipmentMaintenanceEvents.ranchId,
+            eventDate: equipmentMaintenanceEvents.eventDate,
+            eventType: equipmentMaintenanceEvents.eventType,
+            title: equipmentMaintenanceEvents.title,
+            description: equipmentMaintenanceEvents.description,
+            provider: equipmentMaintenanceEvents.provider,
+            performedBy: equipmentMaintenanceEvents.performedBy,
+            hasInvoice: equipmentMaintenanceEvents.hasInvoice,
+            downtimeHours: equipmentMaintenanceEvents.downtimeHours,
+            laborCost: equipmentMaintenanceEvents.laborCost,
+            partsCost: equipmentMaintenanceEvents.partsCost,
+            totalCost: equipmentMaintenanceEvents.totalCost,
+            meterReading: equipmentMaintenanceEvents.meterReading,
+            meterType: equipmentMaintenanceEvents.meterType,
+            nextDueDate: equipmentMaintenanceEvents.nextDueDate,
+            nextDueMeter: equipmentMaintenanceEvents.nextDueMeter,
+            createdAt: equipmentMaintenanceEvents.createdAt,
+            updatedAt: equipmentMaintenanceEvents.updatedAt,
+            assetName: equipmentAssets.name,
+            assetType: equipmentAssets.assetType,
+            assetMake: equipmentAssets.make,
+            assetModel: equipmentAssets.model,
+            assetModelYear: equipmentAssets.modelYear,
+          })
+          .from(equipmentMaintenanceEvents)
+          .innerJoin(equipmentAssets, eq(equipmentMaintenanceEvents.assetId, equipmentAssets.id))
+          .where(whereClause)
+          .orderBy(...orderByClauses)
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ count: sql<string>`count(*)` })
+          .from(equipmentMaintenanceEvents)
+          .innerJoin(equipmentAssets, eq(equipmentMaintenanceEvents.assetId, equipmentAssets.id))
+          .where(whereClause),
+      ]);
+      const total = Number(countRows[0]?.count ?? 0);
+      const eventIds = rows.map((row) => row.id);
+      const attachmentCountByEventId: Record<string, number> = {};
+      if (eventIds.length > 0) {
+        const attachmentCountRows = await db
+          .select({ entityId: attachments.entityId, count: sql<string>`count(*)` })
+          .from(attachments)
+          .where(
+            and(eq(attachments.ranchId, ranchId), eq(attachments.entityType, "EQUIPMENT_MAINTENANCE"), inArray(attachments.entityId, eventIds))
+          )
+          .groupBy(attachments.entityId);
+        for (const row of attachmentCountRows) {
+          attachmentCountByEventId[row.entityId] = Number(row.count ?? 0);
+        }
+      }
+
+      const events = rows.map((row) => {
+        const providerValue = row.provider?.trim() ?? "";
+        const isDiy = !providerValue.length || row.performedBy === "OWNER" || row.performedBy === "EMPLOYEE";
+        return {
+          ...row,
+          isDiy,
+          attachmentCount: attachmentCountByEventId[row.id] ?? 0,
+        };
+      });
+
+      return reply.send({ events, pagination: { page, limit, total } });
+    } catch (err) {
+      return withErrorHandling(req, reply, err, "Failed to list maintenance events", "Failed to list maintenance events");
     }
   });
 
@@ -936,6 +1243,9 @@ export async function equipmentRoutes(app: FastifyInstance) {
       const data = parsed.data;
       const now = new Date();
       const id = crypto.randomUUID();
+      const performedBy = normalizeEnum(data.performedBy, PERFORMED_BY_TYPES);
+      const hasInvoice = data.hasInvoice === undefined ? null : toBooleanOrNull(data.hasInvoice);
+      const downtimeHours = toNullableDecimalString(data.downtimeHours, { allowZero: true, fieldLabel: "downtimeHours" });
       const laborCost = toNullableDecimalString(data.laborCost, { allowZero: true, fieldLabel: "laborCost" });
       const partsCost = toNullableDecimalString(data.partsCost, { allowZero: true, fieldLabel: "partsCost" });
       let totalCost = toNullableDecimalString(data.totalCost, { allowZero: true, fieldLabel: "totalCost" });
@@ -950,6 +1260,9 @@ export async function equipmentRoutes(app: FastifyInstance) {
         title: data.title.trim(),
         description: data.description?.trim() ? data.description.trim() : null,
         provider: data.provider?.trim() ? data.provider.trim() : null,
+        performedBy: performedBy ?? null,
+        hasInvoice,
+        downtimeHours,
         laborCost,
         partsCost,
         totalCost,
@@ -1011,6 +1324,11 @@ export async function equipmentRoutes(app: FastifyInstance) {
       if (data.title !== undefined) updateSet.title = data.title.trim();
       if (data.description !== undefined) updateSet.description = data.description?.trim() ? data.description.trim() : null;
       if (data.provider !== undefined) updateSet.provider = data.provider?.trim() ? data.provider.trim() : null;
+      if (data.performedBy !== undefined) updateSet.performedBy = normalizeEnum(data.performedBy, PERFORMED_BY_TYPES) ?? null;
+      if (data.hasInvoice !== undefined) updateSet.hasInvoice = toBooleanOrNull(data.hasInvoice);
+      if (data.downtimeHours !== undefined) {
+        updateSet.downtimeHours = toNullableDecimalString(data.downtimeHours, { allowZero: true, fieldLabel: "downtimeHours" });
+      }
       if (data.laborCost !== undefined) updateSet.laborCost = toNullableDecimalString(data.laborCost, { allowZero: true, fieldLabel: "laborCost" });
       if (data.partsCost !== undefined) updateSet.partsCost = toNullableDecimalString(data.partsCost, { allowZero: true, fieldLabel: "partsCost" });
       if (data.totalCost !== undefined) updateSet.totalCost = toNullableDecimalString(data.totalCost, { allowZero: true, fieldLabel: "totalCost" });

@@ -1,5 +1,7 @@
 ﻿import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { useLocation } from "react-router-dom";
+
 import { apiDelete, apiGet, apiPost, apiPostForm, apiPut, apiPutForm } from "@/lib/api";
 import {
   EquipmentAssetDetailResponseSchema,
@@ -17,6 +19,7 @@ import {
   type EquipmentMaintenanceEventType,
   type EquipmentMaintenanceEventWithAttachments,
   type EquipmentMeterType,
+  type EquipmentPerformedBy,
 } from "@/lib/contracts/equipment";
 import { useRanch } from "@/lib/ranchContext";
 
@@ -57,6 +60,9 @@ type MaintenanceFormState = {
   title: string;
   description: string;
   provider: string;
+  performedBy: "" | EquipmentPerformedBy;
+  hasInvoice: "UNKNOWN" | "YES" | "NO";
+  downtimeHours: string;
   laborCost: string;
   partsCost: string;
   totalCost: string;
@@ -79,7 +85,7 @@ const ASSET_TYPES: EquipmentAssetType[] = [
   "PUMP",
   "OTHER",
 ];
-const ASSET_STATUSES: EquipmentAssetStatus[] = ["ACTIVE", "SOLD", "RETIRED", "LOST", "RENTED", "LEASED"];
+const ASSET_STATUSES: EquipmentAssetStatus[] = ["ACTIVE", "DISABLED", "SOLD", "RETIRED", "LOST", "RENTED", "LEASED"];
 const ACQUISITION_TYPES: EquipmentAcquisitionType[] = ["PURCHASED", "LEASED", "RENTED", "INHERITED", "OTHER"];
 const METER_TYPES: EquipmentMeterType[] = ["NONE", "HOURS", "MILES", "OTHER"];
 const IDENTIFIER_TYPES: EquipmentAssetIdentifierType[] = [
@@ -99,6 +105,7 @@ const MAINTENANCE_EVENT_TYPES: EquipmentMaintenanceEventType[] = [
   "WARRANTY",
   "OTHER",
 ];
+const PERFORMED_BY_OPTIONS: EquipmentPerformedBy[] = ["OWNER", "EMPLOYEE", "CONTRACTOR", "DEALER", "UNKNOWN"];
 
 function enumLabel(value: string): string {
   return value
@@ -159,6 +166,9 @@ function createMaintenanceFormState(seedMeterType: EquipmentMeterType = "NONE"):
     title: "",
     description: "",
     provider: "",
+    performedBy: "",
+    hasInvoice: "UNKNOWN",
+    downtimeHours: "",
     laborCost: "",
     partsCost: "",
     totalCost: "",
@@ -175,6 +185,7 @@ function appendIfPresent(fd: FormData, key: string, value: string) {
 }
 
 export default function EquipmentAssetsPage() {
+  const location = useLocation();
   const { activeRanchId, loading: ranchLoading } = useRanch();
 
   const [assets, setAssets] = useState<EquipmentAssetRow[]>([]);
@@ -331,6 +342,10 @@ export default function EquipmentAssetsPage() {
     fd.append("title", maintenanceForm.title.trim());
     appendIfPresent(fd, "description", maintenanceForm.description);
     appendIfPresent(fd, "provider", maintenanceForm.provider);
+    appendIfPresent(fd, "performedBy", maintenanceForm.performedBy);
+    if (maintenanceForm.hasInvoice === "YES") fd.append("hasInvoice", "true");
+    if (maintenanceForm.hasInvoice === "NO") fd.append("hasInvoice", "false");
+    appendIfPresent(fd, "downtimeHours", maintenanceForm.downtimeHours);
     appendIfPresent(fd, "laborCost", maintenanceForm.laborCost);
     appendIfPresent(fd, "partsCost", maintenanceForm.partsCost);
     appendIfPresent(fd, "totalCost", maintenanceForm.totalCost);
@@ -349,6 +364,7 @@ export default function EquipmentAssetsPage() {
     setLoadError(null);
     try {
       const params = new URLSearchParams();
+      params.set("limit", "200");
       if (assetTypeFilter !== "ALL") params.set("assetType", assetTypeFilter);
       if (statusFilter !== "ALL") params.set("status", statusFilter);
       if (search.trim().length > 0) params.set("search", search.trim());
@@ -505,6 +521,9 @@ export default function EquipmentAssetsPage() {
       title: event.title ?? "",
       description: event.description ?? "",
       provider: event.provider ?? "",
+      performedBy: (event.performedBy as EquipmentPerformedBy | "") ?? "",
+      hasInvoice: event.hasInvoice === true ? "YES" : event.hasInvoice === false ? "NO" : "UNKNOWN",
+      downtimeHours: toInputValue(event.downtimeHours),
       laborCost: toInputValue(event.laborCost),
       partsCost: toInputValue(event.partsCost),
       totalCost: toInputValue(event.totalCost),
@@ -583,6 +602,15 @@ export default function EquipmentAssetsPage() {
     void loadAssets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRanchId, assetTypeFilter, statusFilter, search]);
+
+  useEffect(() => {
+    if (!activeRanchId) return;
+    const params = new URLSearchParams(location.search);
+    const assetId = params.get("assetId");
+    if (!assetId || !/^[0-9a-fA-F-]{36}$/.test(assetId)) return;
+    void startEdit(assetId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRanchId, location.search]);
 
   useEffect(() => {
     if (!detail?.asset.id || !detail.asset.trackMaintenance) {
@@ -1207,6 +1235,65 @@ export default function EquipmentAssetsPage() {
                           />
                         </div>
                         <div className="space-y-1">
+                          <Label htmlFor="maintenance-performed-by">Performed by</Label>
+                          <Select
+                            value={maintenanceForm.performedBy || "UNSET"}
+                            onValueChange={(value) =>
+                              setMaintenanceForm((prev) => ({
+                                ...prev,
+                                performedBy: value === "UNSET" ? "" : (value as EquipmentPerformedBy),
+                              }))
+                            }
+                            disabled={!canInteract}
+                          >
+                            <SelectTrigger id="maintenance-performed-by" aria-label="Maintenance performed by">
+                              <SelectValue placeholder="Select performed by" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="UNSET">Not specified</SelectItem>
+                              {PERFORMED_BY_OPTIONS.map((option) => (
+                                <SelectItem key={option} value={option}>
+                                  {enumLabel(option)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label htmlFor="maintenance-has-invoice">Invoice</Label>
+                          <Select
+                            value={maintenanceForm.hasInvoice}
+                            onValueChange={(value) =>
+                              setMaintenanceForm((prev) => ({
+                                ...prev,
+                                hasInvoice: value as "UNKNOWN" | "YES" | "NO",
+                              }))
+                            }
+                            disabled={!canInteract}
+                          >
+                            <SelectTrigger id="maintenance-has-invoice" aria-label="Maintenance invoice status">
+                              <SelectValue placeholder="Select invoice status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="UNKNOWN">Unknown / Not set</SelectItem>
+                              <SelectItem value="YES">Has invoice</SelectItem>
+                              <SelectItem value="NO">No invoice</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="maintenance-downtime-hours">Downtime hours</Label>
+                          <Input
+                            id="maintenance-downtime-hours"
+                            value={maintenanceForm.downtimeHours}
+                            onChange={(e) => setMaintenanceForm((prev) => ({ ...prev, downtimeHours: e.target.value }))}
+                            disabled={!canInteract}
+                            placeholder="Optional"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
                           <Label htmlFor="maintenance-meter-reading">Meter reading</Label>
                           <Input
                             id="maintenance-meter-reading"
@@ -1359,7 +1446,20 @@ export default function EquipmentAssetsPage() {
 
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-stone-700">
                             <div>
-                              <span className="text-stone-500">Provider:</span> {event.provider ?? "-"}
+                              <span className="text-stone-500">Provider:</span>{" "}
+                              {event.provider ?? (event.performedBy === "OWNER" || event.performedBy === "EMPLOYEE" ? "DIY" : "-")}
+                            </div>
+                            <div>
+                              <span className="text-stone-500">Performed by:</span>{" "}
+                              {event.performedBy ? enumLabel(String(event.performedBy)) : "-"}
+                            </div>
+                            <div>
+                              <span className="text-stone-500">Invoice:</span>{" "}
+                              {event.hasInvoice === true ? "Yes" : event.hasInvoice === false ? "No" : "-"}
+                            </div>
+                            <div>
+                              <span className="text-stone-500">Downtime:</span>{" "}
+                              {event.downtimeHours == null || event.downtimeHours === "" ? "-" : `${event.downtimeHours} hrs`}
                             </div>
                             <div>
                               <span className="text-stone-500">Meter:</span>{" "}

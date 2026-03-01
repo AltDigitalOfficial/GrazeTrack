@@ -31,9 +31,8 @@ import GrazingPlansPage from "@/modules/land-management/pages/GrazingPlansPage";
 /* ---------------------------
    HARDWARE MANAGEMENT
 ---------------------------- */
-import HardwareOverviewPage from "@/modules/hardware-management/pages/HardwareOverviewPage";
-import VehiclesPage from "@/modules/hardware-management/pages/VehiclesPage";
-import TractorsPage from "@/modules/hardware-management/pages/TractorsPage";
+import HardwareAssetsOverviewPage from "@/modules/hardware-management/pages/HardwareAssetsOverviewPage";
+import HardwareMaintenanceLogPage from "@/modules/hardware-management/pages/HardwareMaintenanceLogPage";
 
 /* ---------------------------
    SUPPLIES & CONSUMABLES
@@ -123,9 +122,9 @@ export default function App() {
         />
 
         {/* HARDWARE MANAGEMENT */}
-        <Route path="/hardware" element={<HardwareOverviewPage />} />
-        <Route path="/hardware/vehicles" element={<VehiclesPage />} />
-        <Route path="/hardware/tractors" element={<TractorsPage />} />
+        <Route path="/hardware" element={<HardwareAssetsOverviewPage />} />
+        <Route path="/hardware/assets" element={<HardwareAssetsOverviewPage />} />
+        <Route path="/hardware/maintenance" element={<HardwareMaintenanceLogPage />} />
 
         {/* SUPPLIES */}
         <Route path="/supplies" element={<SuppliesOverviewPage />} />

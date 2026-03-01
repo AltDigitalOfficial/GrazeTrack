@@ -54,7 +54,7 @@ BEGIN
   ) THEN
     ALTER TABLE equipment_assets
       ADD CONSTRAINT equipment_assets_status_chk
-      CHECK (status IN ('ACTIVE', 'SOLD', 'RETIRED', 'LOST', 'RENTED', 'LEASED'));
+      CHECK (status IN ('ACTIVE', 'DISABLED', 'SOLD', 'RETIRED', 'LOST', 'RENTED', 'LEASED'));
   END IF;
 
   IF NOT EXISTS (
@@ -129,6 +129,9 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance_events (
   title text NOT NULL,
   description text,
   provider text,
+  performed_by text,
+  has_invoice boolean,
+  downtime_hours numeric,
   labor_cost numeric,
   parts_cost numeric,
   total_cost numeric,
@@ -156,6 +159,14 @@ BEGIN
     ALTER TABLE equipment_maintenance_events
       ADD CONSTRAINT equipment_maintenance_events_meter_type_chk
       CHECK (meter_type IS NULL OR meter_type IN ('NONE', 'HOURS', 'MILES', 'OTHER'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'equipment_maintenance_events_performed_by_chk'
+  ) THEN
+    ALTER TABLE equipment_maintenance_events
+      ADD CONSTRAINT equipment_maintenance_events_performed_by_chk
+      CHECK (performed_by IS NULL OR performed_by IN ('OWNER', 'EMPLOYEE', 'CONTRACTOR', 'DEALER', 'UNKNOWN'));
   END IF;
 END
 $$;

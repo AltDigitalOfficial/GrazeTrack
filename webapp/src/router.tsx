@@ -35,9 +35,8 @@ import SoilVegetationPage from "./modules/land-management/pages/SoilVegetationPa
 import GrazingPlansPage from "./modules/land-management/pages/GrazingPlansPage";
 
 // Hardware
-import HardwareOverviewPage from "./modules/hardware-management/pages/HardwareOverviewPage";
-import VehiclesPage from "./modules/hardware-management/pages/VehiclesPage";
-import TractorsPage from "./modules/hardware-management/pages/TractorsPage";
+import HardwareAssetsOverviewPage from "./modules/hardware-management/pages/HardwareAssetsOverviewPage";
+import HardwareMaintenanceLogPage from "./modules/hardware-management/pages/HardwareMaintenanceLogPage";
 
 // Supplies (Medications etc)
 import MedicationsOverviewPage from "./modules/supplies/pages/MedicationsPage";
@@ -122,9 +121,9 @@ export const router = createBrowserRouter([
           { path: ROUTES.land.grazing, element: <GrazingPlansPage /> },
 
           // Hardware
-          { path: ROUTES.hardware.root, element: <HardwareOverviewPage /> },
-          { path: ROUTES.hardware.vehicles, element: <VehiclesPage /> },
-          { path: ROUTES.hardware.tractors, element: <TractorsPage /> },
+          { path: "/hardware", element: <HardwareAssetsOverviewPage /> },
+          { path: ROUTES.hardware.root, element: <HardwareAssetsOverviewPage /> },
+          { path: ROUTES.hardware.maintenanceLog, element: <HardwareMaintenanceLogPage /> },
 
           // Supplies
           { path: ROUTES.supplies.root, element: <SuppliesOverviewPage /> },

@@ -16,7 +16,7 @@ export const EquipmentAssetTypeSchema = z.enum([
   "OTHER",
 ]);
 
-export const EquipmentAssetStatusSchema = z.enum(["ACTIVE", "SOLD", "RETIRED", "LOST", "RENTED", "LEASED"]);
+export const EquipmentAssetStatusSchema = z.enum(["ACTIVE", "DISABLED", "SOLD", "RETIRED", "LOST", "RENTED", "LEASED"]);
 export const EquipmentAcquisitionTypeSchema = z.enum(["PURCHASED", "LEASED", "RENTED", "INHERITED", "OTHER"]);
 export const EquipmentMeterTypeSchema = z.enum(["NONE", "HOURS", "MILES", "OTHER"]);
 export const EquipmentMaintenanceEventTypeSchema = z.enum([
@@ -27,6 +27,7 @@ export const EquipmentMaintenanceEventTypeSchema = z.enum([
   "WARRANTY",
   "OTHER",
 ]);
+export const EquipmentPerformedBySchema = z.enum(["OWNER", "EMPLOYEE", "CONTRACTOR", "DEALER", "UNKNOWN"]);
 export const EquipmentAssetIdentifierTypeSchema = z.enum([
   "VIN",
   "PIN",
@@ -84,6 +85,9 @@ export const EquipmentMaintenanceEventSchema = z.object({
   title: z.string(),
   description: z.string().nullable().optional(),
   provider: z.string().nullable().optional(),
+  performedBy: z.union([EquipmentPerformedBySchema, z.string()]).nullable().optional(),
+  hasInvoice: z.boolean().nullable().optional(),
+  downtimeHours: NumericValueSchema.nullable().optional(),
   laborCost: NumericValueSchema.nullable().optional(),
   partsCost: NumericValueSchema.nullable().optional(),
   totalCost: NumericValueSchema.nullable().optional(),
@@ -115,6 +119,11 @@ export const EquipmentAssetRowSchema = z.object({
   trackMaintenance: z.boolean(),
   meterType: z.union([EquipmentMeterTypeSchema, z.string()]),
   defaultMeterUnitLabel: z.string().nullable().optional(),
+  lastEventDate: z.string().nullable().optional(),
+  nextDueDate: z.string().nullable().optional(),
+  nextDueMeter: NumericValueSchema.nullable().optional(),
+  maintenanceEventCount: z.number().optional(),
+  attachmentCount: z.number().optional(),
   notes: z.string().nullable().optional(),
   createdAt: z.union([z.string(), z.date()]).optional(),
   updatedAt: z.union([z.string(), z.date()]).optional(),
@@ -163,6 +172,13 @@ export const EquipmentPartInventoryEventWithAttachmentsSchema = EquipmentPartInv
 
 export const EquipmentAssetsResponseSchema = z.object({
   assets: z.array(EquipmentAssetRowSchema),
+  pagination: z
+    .object({
+      page: z.number(),
+      limit: z.number(),
+      total: z.number(),
+    })
+    .optional(),
 });
 
 export const EquipmentAssetDetailResponseSchema = z.object({
@@ -183,6 +199,27 @@ export const EquipmentAttachmentsResponseSchema = z.object({
 
 export const EquipmentMaintenanceEventsResponseSchema = z.object({
   events: z.array(EquipmentMaintenanceEventWithAttachmentsSchema),
+});
+
+export const EquipmentMaintenanceLogRowSchema = EquipmentMaintenanceEventSchema.extend({
+  assetName: z.string(),
+  assetType: z.union([EquipmentAssetTypeSchema, z.string()]),
+  assetMake: z.string().nullable().optional(),
+  assetModel: z.string().nullable().optional(),
+  assetModelYear: z.number().nullable().optional(),
+  isDiy: z.boolean().optional(),
+  attachmentCount: z.number().optional(),
+});
+
+export const EquipmentMaintenanceLogResponseSchema = z.object({
+  events: z.array(EquipmentMaintenanceLogRowSchema),
+  pagination: z
+    .object({
+      page: z.number(),
+      limit: z.number(),
+      total: z.number(),
+    })
+    .optional(),
 });
 
 export const EquipmentMaintenanceEventResponseSchema = z.object({
@@ -222,6 +259,7 @@ export type EquipmentAssetStatus = z.infer<typeof EquipmentAssetStatusSchema>;
 export type EquipmentAcquisitionType = z.infer<typeof EquipmentAcquisitionTypeSchema>;
 export type EquipmentMeterType = z.infer<typeof EquipmentMeterTypeSchema>;
 export type EquipmentMaintenanceEventType = z.infer<typeof EquipmentMaintenanceEventTypeSchema>;
+export type EquipmentPerformedBy = z.infer<typeof EquipmentPerformedBySchema>;
 export type EquipmentAssetIdentifierType = z.infer<typeof EquipmentAssetIdentifierTypeSchema>;
 export type EquipmentPartCategory = z.infer<typeof EquipmentPartCategorySchema>;
 export type EquipmentPartUnitType = z.infer<typeof EquipmentPartUnitTypeSchema>;
@@ -231,6 +269,7 @@ export type EquipmentAssetIdentifier = z.infer<typeof EquipmentAssetIdentifierSc
 export type EquipmentAttachment = z.infer<typeof EquipmentAttachmentSchema>;
 export type EquipmentMaintenanceEvent = z.infer<typeof EquipmentMaintenanceEventSchema>;
 export type EquipmentMaintenanceEventWithAttachments = z.infer<typeof EquipmentMaintenanceEventWithAttachmentsSchema>;
+export type EquipmentMaintenanceLogRow = z.infer<typeof EquipmentMaintenanceLogRowSchema>;
 export type EquipmentPartRow = z.infer<typeof EquipmentPartRowSchema>;
 export type EquipmentPartInventoryEvent = z.infer<typeof EquipmentPartInventoryEventSchema>;
 export type EquipmentPartInventoryEventWithAttachments = z.infer<typeof EquipmentPartInventoryEventWithAttachmentsSchema>;

@@ -7,6 +7,7 @@ import {
   decimal,
   customType,
   date,
+  time,
   boolean,
   index,
   uniqueIndex,
@@ -1276,6 +1277,9 @@ export const equipmentMaintenanceEvents = pgTable(
     title: text("title").notNull(),
     description: text("description"),
     provider: text("provider"),
+    performedBy: text("performed_by"),
+    hasInvoice: boolean("has_invoice"),
+    downtimeHours: decimal("downtime_hours"),
     laborCost: decimal("labor_cost"),
     partsCost: decimal("parts_cost"),
     totalCost: decimal("total_cost"),
@@ -1363,5 +1367,114 @@ export const attachments = pgTable(
   (t) => ({
     ranchIdx: index("attachments_ranch_idx").on(t.ranchId),
     lookupIdx: index("attachments_lookup_idx").on(t.ranchId, t.entityType, t.entityId, t.createdAt),
+  })
+);
+
+/* =========================================================================================
+ * Working Day Plan Module (v1)
+ * ========================================================================================= */
+
+export const workingDayTaskCatalog = pgTable(
+  "working_day_task_catalog",
+  {
+    id: pgUuid("id").primaryKey(),
+    category: text("category").notNull(),
+    taskType: text("task_type").notNull(),
+    label: text("label").notNull(),
+    suggestedSupplyNeedsJson: jsonb("suggested_supply_needs_json").notNull().default([]),
+    suggestedEquipmentNeedsJson: jsonb("suggested_equipment_needs_json").notNull().default([]),
+    isActive: boolean("is_active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    taskTypeUniqueIdx: uniqueIndex("working_day_task_catalog_task_type_unique_idx").on(t.taskType),
+    categoryLookupIdx: index("working_day_task_catalog_category_lookup_idx").on(t.category, t.isActive, t.sortOrder, t.label),
+  })
+);
+
+export const workingDayPlans = pgTable(
+  "working_day_plans",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    planDate: date("plan_date").notNull(),
+    title: text("title").default("Working Day Plan"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchDateUniqueIdx: uniqueIndex("working_day_plans_ranch_date_unique_idx").on(t.ranchId, t.planDate),
+    ranchDateLookupIdx: index("working_day_plans_ranch_date_lookup_idx").on(t.ranchId, t.planDate, t.updatedAt),
+  })
+);
+
+export const workingDayPlanItems = pgTable(
+  "working_day_plan_items",
+  {
+    id: pgUuid("id").primaryKey(),
+    planId: pgUuid("plan_id").notNull(),
+    category: text("category").notNull(),
+    taskType: text("task_type").notNull(),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("PLANNED"),
+    startTime: time("start_time"),
+    endTime: time("end_time"),
+    herdId: pgUuid("herd_id"),
+    animalId: pgUuid("animal_id"),
+    locationText: text("location_text"),
+    notes: text("notes"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    planIdx: index("working_day_plan_items_plan_idx").on(t.planId),
+    planSortIdx: index("working_day_plan_items_plan_sort_idx").on(t.planId, t.sortOrder, t.createdAt),
+    planCategorySortIdx: index("working_day_plan_items_plan_category_sort_idx").on(t.planId, t.category, t.sortOrder, t.createdAt),
+    herdIdx: index("working_day_plan_items_herd_idx").on(t.herdId),
+    animalIdx: index("working_day_plan_items_animal_idx").on(t.animalId),
+  })
+);
+
+export const workingDayPlanItemSupplyNeeds = pgTable(
+  "working_day_plan_item_supply_needs",
+  {
+    id: pgUuid("id").primaryKey(),
+    planItemId: pgUuid("plan_item_id").notNull(),
+    supplyType: text("supply_type").notNull(),
+    linkedEntityType: text("linked_entity_type"),
+    linkedEntityId: pgUuid("linked_entity_id"),
+    nameOverride: text("name_override"),
+    requiredQuantity: decimal("required_quantity"),
+    unit: text("unit"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    planItemIdx: index("working_day_plan_item_supply_needs_plan_item_idx").on(t.planItemId),
+    supplyTypeIdx: index("working_day_plan_item_supply_needs_supply_type_idx").on(t.supplyType),
+    linkedEntityIdx: index("working_day_plan_item_supply_needs_linked_entity_idx").on(t.linkedEntityType, t.linkedEntityId),
+  })
+);
+
+export const workingDayPlanItemEquipmentNeeds = pgTable(
+  "working_day_plan_item_equipment_needs",
+  {
+    id: pgUuid("id").primaryKey(),
+    planItemId: pgUuid("plan_item_id").notNull(),
+    assetId: pgUuid("asset_id"),
+    assetTypeHint: text("asset_type_hint"),
+    mustBeOperational: boolean("must_be_operational").notNull().default(true),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    planItemIdx: index("working_day_plan_item_equipment_needs_plan_item_idx").on(t.planItemId),
+    assetIdx: index("working_day_plan_item_equipment_needs_asset_idx").on(t.assetId),
   })
 );
