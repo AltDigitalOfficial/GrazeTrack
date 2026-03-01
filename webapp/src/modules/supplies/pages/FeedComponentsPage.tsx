@@ -31,9 +31,35 @@ import {
 
 type PhotoPurpose = "packaging" | "misc";
 type FeedUnitType = "WEIGHT" | "COUNT" | "VOLUME";
+type FeedComponentCategory =
+  | "FORAGE"
+  | "GRAIN"
+  | "MINERAL"
+  | "SUPPLEMENT"
+  | "ADDITIVE"
+  | "OTHER";
+type FeedDeliveryMethod = "FREE_CHOICE" | "MIXED_IN_FEED" | "WATER" | "TOP_DRESS" | "OTHER";
+type CategoryFilterMode = "ALL" | "ADDITIVE_SET" | FeedComponentCategory;
 
 type ExistingPhotosByPurpose = Record<PhotoPurpose, ExistingFeedPhoto[]>;
 type LocalPhotosByPurpose = Record<PhotoPurpose, LocalFeedPhoto[]>;
+
+const FEED_CATEGORIES: FeedComponentCategory[] = [
+  "FORAGE",
+  "GRAIN",
+  "MINERAL",
+  "SUPPLEMENT",
+  "ADDITIVE",
+  "OTHER",
+];
+const ADDITIVE_CATEGORIES: FeedComponentCategory[] = ["MINERAL", "SUPPLEMENT", "ADDITIVE"];
+const DELIVERY_METHODS: FeedDeliveryMethod[] = [
+  "FREE_CHOICE",
+  "MIXED_IN_FEED",
+  "WATER",
+  "TOP_DRESS",
+  "OTHER",
+];
 
 function unitTypeForUi(value: string | null | undefined): FeedUnitType {
   const normalized = String(value ?? "").trim().toUpperCase();
@@ -41,6 +67,32 @@ function unitTypeForUi(value: string | null | undefined): FeedUnitType {
     return normalized as FeedUnitType;
   }
   return "COUNT";
+}
+
+function categoryForUi(value: string | null | undefined): FeedComponentCategory {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (FEED_CATEGORIES.includes(normalized as FeedComponentCategory)) {
+    return normalized as FeedComponentCategory;
+  }
+  return "OTHER";
+}
+
+function deliveryMethodForUi(value: string | null | undefined): FeedDeliveryMethod | "NONE" {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (DELIVERY_METHODS.includes(normalized as FeedDeliveryMethod)) {
+    return normalized as FeedDeliveryMethod;
+  }
+  return "NONE";
+}
+
+function categoriesForFilterMode(mode: CategoryFilterMode): FeedComponentCategory[] {
+  if (mode === "ALL") return [];
+  if (mode === "ADDITIVE_SET") return ADDITIVE_CATEGORIES;
+  return [mode];
+}
+
+function categoryLabel(value: FeedComponentCategory): string {
+  return value.charAt(0) + value.slice(1).toLowerCase();
 }
 
 function emptyExistingPhotos(): ExistingPhotosByPurpose {
@@ -61,7 +113,46 @@ function speciesLabel(row: FeedComponentRow): string {
   return values.join(", ");
 }
 
-export default function FeedComponentsPage() {
+function filterModeLabel(mode: CategoryFilterMode): string {
+  if (mode === "ALL") return "All categories";
+  if (mode === "ADDITIVE_SET") return "Additives only";
+  return categoryLabel(mode);
+}
+
+function badgeClasses(category: FeedComponentCategory): string {
+  if (category === "MINERAL" || category === "SUPPLEMENT" || category === "ADDITIVE") {
+    return "bg-amber-100 text-amber-800 border-amber-200";
+  }
+  return "bg-stone-100 text-stone-700 border-stone-200";
+}
+
+export type FeedComponentsManagerProps = {
+  title: string;
+  description: string;
+  noRanchMessage: string;
+  createTitle: string;
+  editTitle: string;
+  createSubmitLabel: string;
+  editSubmitLabel: string;
+  listTitle: string;
+  emptyListMessage: string;
+  defaultFormCategory: FeedComponentCategory;
+  defaultCategoryFilter: CategoryFilterMode;
+};
+
+export function FeedComponentsManager({
+  title,
+  description,
+  noRanchMessage,
+  createTitle,
+  editTitle,
+  createSubmitLabel,
+  editSubmitLabel,
+  listTitle,
+  emptyListMessage,
+  defaultFormCategory,
+  defaultCategoryFilter,
+}: FeedComponentsManagerProps) {
   const { activeRanchId, loading: ranchLoading } = useRanch();
 
   const [components, setComponents] = useState<FeedComponentRow[]>([]);
@@ -75,9 +166,12 @@ export default function FeedComponentsPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [categoryFilterMode, setCategoryFilterMode] = useState<CategoryFilterMode>(defaultCategoryFilter);
 
   const [name, setName] = useState("");
   const [manufacturerName, setManufacturerName] = useState("");
+  const [category, setCategory] = useState<FeedComponentCategory>(defaultFormCategory);
+  const [deliveryMethod, setDeliveryMethod] = useState<FeedDeliveryMethod | "NONE">("NONE");
   const [unitType, setUnitType] = useState<FeedUnitType>("WEIGHT");
   const [defaultUnit, setDefaultUnit] = useState("lb");
   const [defaultPackageWeight, setDefaultPackageWeight] = useState("");
@@ -105,6 +199,8 @@ export default function FeedComponentsPage() {
     setEditingId(null);
     setName("");
     setManufacturerName("");
+    setCategory(defaultFormCategory);
+    setDeliveryMethod("NONE");
     setUnitType("WEIGHT");
     setDefaultUnit("lb");
     setDefaultPackageWeight("");
@@ -165,7 +261,11 @@ export default function FeedComponentsPage() {
     setLoadingComponents(true);
     setLoadError(null);
     try {
-      const raw = await apiGet("/feed/components");
+      const categories = categoriesForFilterMode(categoryFilterMode);
+      const params = new URLSearchParams();
+      if (categories.length > 0) params.set("category", categories.join(","));
+      const endpoint = params.toString() ? `/feed/components?${params.toString()}` : "/feed/components";
+      const raw = await apiGet(endpoint);
       const parsed = FeedComponentsResponseSchema.parse(raw);
       setComponents(parsed.components ?? []);
     } catch (err: unknown) {
@@ -198,6 +298,8 @@ export default function FeedComponentsPage() {
       setEditingId(component.id);
       setName(component.name ?? "");
       setManufacturerName(component.manufacturerName ?? "");
+      setCategory(categoryForUi(component.category));
+      setDeliveryMethod(deliveryMethodForUi(component.deliveryMethod));
       setUnitType(unitTypeForUi(component.unitType));
       setDefaultUnit(component.defaultUnit ?? "lb");
       setDefaultPackageWeight(component.defaultPackageWeight ?? "");
@@ -237,6 +339,8 @@ export default function FeedComponentsPage() {
       const fd = new FormData();
       fd.append("name", name.trim());
       if (manufacturerName.trim()) fd.append("manufacturerName", manufacturerName.trim());
+      fd.append("category", category);
+      fd.append("deliveryMethod", deliveryMethod === "NONE" ? "" : deliveryMethod);
       fd.append("unitType", unitType);
       if (defaultUnit.trim()) fd.append("defaultUnit", defaultUnit.trim());
       fd.append("defaultPackageWeight", defaultPackageWeight.trim());
@@ -274,7 +378,14 @@ export default function FeedComponentsPage() {
   useEffect(() => {
     if (!activeRanchId) return;
     void Promise.all([loadComponents(), loadSpecies()]);
-  }, [activeRanchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRanchId, categoryFilterMode]);
+
+  useEffect(() => {
+    setCategoryFilterMode(defaultCategoryFilter);
+    setCategory(defaultFormCategory);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultCategoryFilter, defaultFormCategory]);
 
   useEffect(() => {
     return () => {
@@ -286,19 +397,17 @@ export default function FeedComponentsPage() {
   return (
     <div className="p-6 space-y-6">
       <header>
-        <h1 className="text-3xl font-bold text-stone-800">Feed Components</h1>
-        <p className="text-stone-600 mt-1">
-          Define feed ingredients and attach packaging photos for future OCR/CV workflows.
-        </p>
+        <h1 className="text-3xl font-bold text-stone-800">{title}</h1>
+        <p className="text-stone-600 mt-1">{description}</p>
       </header>
 
       {!ranchLoading && !activeRanchId && (
         <Card title="No Ranch Selected">
-          <div className="text-sm text-stone-700">Select a ranch to manage feed components.</div>
+          <div className="text-sm text-stone-700">{noRanchMessage}</div>
         </Card>
       )}
 
-      <Card title={editingId ? "Edit Feed Component" : "Create Feed Component"}>
+      <Card title={editingId ? editTitle : createTitle}>
         <form onSubmit={submitForm} className="space-y-4 p-4">
           {saveError && <div className="text-sm text-red-600">{saveError}</div>}
 
@@ -321,6 +430,39 @@ export default function FeedComponentsPage() {
                 onChange={(e) => setManufacturerName(e.target.value)}
                 disabled={!canInteract}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="feed-component-category">Category</Label>
+              <Select value={category} onValueChange={(value) => setCategory(value as FeedComponentCategory)} disabled={!canInteract}>
+                <SelectTrigger id="feed-component-category" aria-label="Feed component category">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {FEED_CATEGORIES.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {categoryLabel(option)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="feed-component-delivery-method">Delivery Method (optional)</Label>
+              <Select value={deliveryMethod} onValueChange={(value) => setDeliveryMethod(value as FeedDeliveryMethod | "NONE")} disabled={!canInteract}>
+                <SelectTrigger id="feed-component-delivery-method" aria-label="Feed component delivery method">
+                  <SelectValue placeholder="Select delivery method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NONE">Not set</SelectItem>
+                  {DELIVERY_METHODS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option.replaceAll("_", " ")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
@@ -444,66 +586,118 @@ export default function FeedComponentsPage() {
               </Button>
             )}
             <Button type="submit" disabled={!canInteract}>
-              {saving ? "Saving..." : editingId ? "Save Component" : "Create Component"}
+              {saving ? "Saving..." : editingId ? editSubmitLabel : createSubmitLabel}
             </Button>
           </div>
         </form>
       </Card>
 
-      <Card title="Component List">
+      <Card title={listTitle}>
         <div className="space-y-3 p-4">
           {loadError && <div className="text-sm text-red-600">{loadError}</div>}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="feed-component-category-filter">Category Filter</Label>
+              <Select
+                value={categoryFilterMode}
+                onValueChange={(value) => setCategoryFilterMode(value as CategoryFilterMode)}
+                disabled={!canInteract}
+              >
+                <SelectTrigger id="feed-component-category-filter" aria-label="Feed component category filter">
+                  <SelectValue placeholder="Select category filter" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All categories</SelectItem>
+                  <SelectItem value="ADDITIVE_SET">Additives only</SelectItem>
+                  {FEED_CATEGORIES.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {categoryLabel(option)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="text-xs text-muted-foreground">
+                Active filter: {filterModeLabel(categoryFilterMode)}
+              </div>
+            </div>
+          </div>
 
           <div className="border rounded-md overflow-hidden">
             <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs font-semibold text-stone-600 bg-stone-50">
               <div className="col-span-4">Component</div>
-              <div className="col-span-3">Eligible Species</div>
+              <div className="col-span-2">Category</div>
+              <div className="col-span-2">Eligible Species</div>
               <div className="col-span-2">On Hand</div>
-              <div className="col-span-3 text-right">Actions</div>
+              <div className="col-span-2 text-right">Actions</div>
             </div>
 
             {loadingComponents ? (
               <div className="px-3 py-8 text-sm text-stone-500 text-center">Loading...</div>
             ) : components.length === 0 ? (
-              <div className="px-3 py-8 text-sm text-stone-500 text-center">
-                No feed components yet.
-              </div>
+              <div className="px-3 py-8 text-sm text-stone-500 text-center">{emptyListMessage}</div>
             ) : (
               <div className="divide-y">
-                {components.map((row) => (
-                  <div key={row.id} className="grid grid-cols-12 gap-2 px-3 py-3 text-sm items-center">
-                    <div className="col-span-4">
-                      <div className="font-medium text-stone-800">{row.name}</div>
-                      {row.manufacturerName && (
-                        <div className="text-xs text-stone-500">{row.manufacturerName}</div>
-                      )}
-                      <div className="text-xs text-stone-500">
-                        {unitTypeForUi(row.unitType)} | default: {row.defaultUnit}
+                {components.map((row) => {
+                  const rowCategory = categoryForUi(row.category);
+                  return (
+                    <div key={row.id} className="grid grid-cols-12 gap-2 px-3 py-3 text-sm items-center">
+                      <div className="col-span-4">
+                        <div className="font-medium text-stone-800">{row.name}</div>
+                        {row.manufacturerName && (
+                          <div className="text-xs text-stone-500">{row.manufacturerName}</div>
+                        )}
+                        <div className="text-xs text-stone-500">
+                          {unitTypeForUi(row.unitType)} | default: {row.defaultUnit}
+                        </div>
+                      </div>
+                      <div className="col-span-2">
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs ${badgeClasses(rowCategory)}`}>
+                          {categoryLabel(rowCategory)}
+                        </span>
+                      </div>
+                      <div className="col-span-2 text-stone-700">{speciesLabel(row)}</div>
+                      <div className="col-span-2 text-stone-700">
+                        {row.quantityOnHand ?? "0"} {row.defaultUnit}
+                      </div>
+                      <div className="col-span-2 flex justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => startEdit(row.id)}
+                          disabled={!canInteract}
+                          aria-label={`Edit ${row.name}`}
+                        >
+                          Edit
+                        </Button>
                       </div>
                     </div>
-                    <div className="col-span-3 text-stone-700">{speciesLabel(row)}</div>
-                    <div className="col-span-2 text-stone-700">
-                      {row.quantityOnHand ?? "0"} {row.defaultUnit}
-                    </div>
-                    <div className="col-span-3 flex justify-end">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => startEdit(row.id)}
-                        disabled={!canInteract}
-                        aria-label={`Edit ${row.name}`}
-                      >
-                        Edit
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
       </Card>
     </div>
+  );
+}
+
+export default function FeedComponentsPage() {
+  return (
+    <FeedComponentsManager
+      title="Feed Components"
+      description="Define feed ingredients and attach packaging photos for future OCR/CV workflows."
+      noRanchMessage="Select a ranch to manage feed components."
+      createTitle="Create Feed Component"
+      editTitle="Edit Feed Component"
+      createSubmitLabel="Create Component"
+      editSubmitLabel="Save Component"
+      listTitle="Component List"
+      emptyListMessage="No feed components yet."
+      defaultFormCategory="OTHER"
+      defaultCategoryFilter="ALL"
+    />
   );
 }

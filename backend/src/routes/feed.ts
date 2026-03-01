@@ -31,6 +31,8 @@ type ParsedMultipart = {
 
 type FeedPhotoEntityType = "COMPONENT" | "BLEND" | "PURCHASE";
 type FeedUnitType = "WEIGHT" | "COUNT" | "VOLUME";
+type FeedComponentCategory = "FORAGE" | "GRAIN" | "MINERAL" | "SUPPLEMENT" | "ADDITIVE" | "OTHER";
+type FeedDeliveryMethod = "FREE_CHOICE" | "MIXED_IN_FEED" | "WATER" | "TOP_DRESS" | "OTHER";
 
 type AppError = Error & { statusCode?: number };
 
@@ -89,6 +91,23 @@ const VOLUME_UNITS = new Set([
   "liters",
 ]);
 
+const FEED_COMPONENT_CATEGORIES = new Set<FeedComponentCategory>([
+  "FORAGE",
+  "GRAIN",
+  "MINERAL",
+  "SUPPLEMENT",
+  "ADDITIVE",
+  "OTHER",
+]);
+
+const FEED_DELIVERY_METHODS = new Set<FeedDeliveryMethod>([
+  "FREE_CHOICE",
+  "MIXED_IN_FEED",
+  "WATER",
+  "TOP_DRESS",
+  "OTHER",
+]);
+
 function normalizeFeedUnitType(value: unknown): FeedUnitType | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toUpperCase();
@@ -96,6 +115,44 @@ function normalizeFeedUnitType(value: unknown): FeedUnitType | null {
     return normalized;
   }
   return null;
+}
+
+function normalizeFeedComponentCategory(value: unknown): FeedComponentCategory | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase();
+  if (FEED_COMPONENT_CATEGORIES.has(normalized as FeedComponentCategory)) {
+    return normalized as FeedComponentCategory;
+  }
+  return null;
+}
+
+function normalizeFeedDeliveryMethod(value: unknown): FeedDeliveryMethod | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase();
+  if (FEED_DELIVERY_METHODS.has(normalized as FeedDeliveryMethod)) {
+    return normalized as FeedDeliveryMethod;
+  }
+  return null;
+}
+
+function parseFeedComponentCategoryFilter(value: unknown): FeedComponentCategory[] {
+  if (typeof value !== "string" || !value.trim().length) return [];
+  const parsed = Array.from(
+    new Set(
+      value
+        .split(",")
+        .map((entry) => normalizeFeedComponentCategory(entry))
+        .filter((entry): entry is FeedComponentCategory => entry !== null)
+    )
+  );
+  const expectedCount = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0).length;
+  if (parsed.length !== expectedCount) {
+    throw appError(400, "Invalid feed component category filter value.");
+  }
+  return parsed;
 }
 
 function inferUnitTypeFromUnit(unit: string | null | undefined): FeedUnitType | null {
@@ -428,6 +485,8 @@ function withErrorHandling(
 const FeedComponentCreateBodySchema = z.object({
   name: z.string().min(1),
   manufacturerName: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
+  deliveryMethod: z.string().optional().nullable(),
   unitType: z.union([z.enum(["WEIGHT", "COUNT", "VOLUME"]), z.string()]).optional().nullable(),
   defaultUnit: z.string().optional().nullable(),
   defaultPackageWeight: z.union([z.string(), z.number()]).optional().nullable(),
@@ -440,6 +499,8 @@ const FeedComponentCreateBodySchema = z.object({
 const FeedComponentUpdateBodySchema = z.object({
   name: z.string().optional(),
   manufacturerName: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
+  deliveryMethod: z.string().optional().nullable(),
   unitType: z.union([z.enum(["WEIGHT", "COUNT", "VOLUME"]), z.string()]).optional().nullable(),
   defaultUnit: z.string().optional().nullable(),
   defaultPackageWeight: z.union([z.string(), z.number()]).optional().nullable(),
@@ -588,6 +649,10 @@ const FeedListQuerySchema = z.object({
     }),
 });
 
+const FeedComponentListQuerySchema = z.object({
+  category: z.string().optional().nullable(),
+});
+
 export async function feedRoutes(app: FastifyInstance) {
   app.get("/feed/species-options", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -606,8 +671,14 @@ export async function feedRoutes(app: FastifyInstance) {
 
   app.get("/feed/components", { preHandler: requireAuth }, async (req, reply) => {
     try {
+      const query = FeedComponentListQuerySchema.parse(req.query ?? {});
       const ranchId = await getActiveRanchId(req.auth!.userId);
       if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+      const categoryFilter = parseFeedComponentCategoryFilter(query.category);
+      const componentWhere =
+        categoryFilter.length > 0
+          ? and(eq(feedComponents.ranchId, ranchId), inArray(feedComponents.category, categoryFilter))
+          : eq(feedComponents.ranchId, ranchId);
 
       const [componentRows, speciesRows, balanceRows] = await Promise.all([
         db
@@ -615,6 +686,8 @@ export async function feedRoutes(app: FastifyInstance) {
             id: feedComponents.id,
             name: feedComponents.name,
             manufacturerName: feedComponents.manufacturerName,
+            category: feedComponents.category,
+            deliveryMethod: feedComponents.deliveryMethod,
             unitType: feedComponents.unitType,
             defaultUnit: feedComponents.defaultUnit,
             defaultPackageWeight: feedComponents.defaultPackageWeight,
@@ -625,7 +698,7 @@ export async function feedRoutes(app: FastifyInstance) {
             updatedAt: feedComponents.updatedAt,
           })
           .from(feedComponents)
-          .where(eq(feedComponents.ranchId, ranchId))
+          .where(componentWhere)
           .orderBy(asc(feedComponents.name)),
         db
           .select({
@@ -671,6 +744,8 @@ export async function feedRoutes(app: FastifyInstance) {
             id: row.id,
             name: row.name,
             manufacturerName: row.manufacturerName,
+            category: row.category,
+            deliveryMethod: row.deliveryMethod,
             unitType: row.unitType ?? inferUnitTypeFromUnit(row.defaultUnit),
             defaultUnit: row.defaultUnit,
             defaultPackageWeight: row.defaultPackageWeight,
@@ -703,6 +778,8 @@ export async function feedRoutes(app: FastifyInstance) {
           id: feedComponents.id,
           name: feedComponents.name,
           manufacturerName: feedComponents.manufacturerName,
+          category: feedComponents.category,
+          deliveryMethod: feedComponents.deliveryMethod,
           unitType: feedComponents.unitType,
           defaultUnit: feedComponents.defaultUnit,
           defaultPackageWeight: feedComponents.defaultPackageWeight,
@@ -872,6 +949,19 @@ export async function feedRoutes(app: FastifyInstance) {
       }
 
       const normalizedDefaultUnit = data.defaultUnit?.trim() ? data.defaultUnit.trim() : "lb";
+      const normalizedCategory = data.category
+        ? normalizeFeedComponentCategory(data.category)
+        : ("OTHER" as FeedComponentCategory);
+      if (!normalizedCategory) {
+        throw appError(400, "Invalid feed component category.");
+      }
+      const normalizedDeliveryMethod =
+        data.deliveryMethod && data.deliveryMethod.trim().length > 0
+          ? normalizeFeedDeliveryMethod(data.deliveryMethod)
+          : null;
+      if (data.deliveryMethod && data.deliveryMethod.trim().length > 0 && !normalizedDeliveryMethod) {
+        throw appError(400, "Invalid feed component delivery method.");
+      }
       const normalizedUnitType =
         normalizeFeedUnitType(data.unitType) ?? inferUnitTypeFromUnit(normalizedDefaultUnit);
       const normalizedPackageWeight = toNullableDecimalString(data.defaultPackageWeight, {
@@ -894,6 +984,8 @@ export async function feedRoutes(app: FastifyInstance) {
           ranchId,
           name: data.name.trim(),
           manufacturerName: data.manufacturerName?.trim() ? data.manufacturerName.trim() : null,
+          category: normalizedCategory,
+          deliveryMethod: normalizedDeliveryMethod,
           unitType: normalizedUnitType,
           defaultUnit: normalizedDefaultUnit,
           defaultPackageWeight: normalizedPackageWeight,
@@ -929,6 +1021,8 @@ export async function feedRoutes(app: FastifyInstance) {
           ranchId,
           name: data.name.trim(),
           manufacturerName: data.manufacturerName?.trim() ? data.manufacturerName.trim() : null,
+          category: normalizedCategory,
+          deliveryMethod: normalizedDeliveryMethod,
           unitType: normalizedUnitType,
           defaultUnit: normalizedDefaultUnit,
           defaultPackageWeight: normalizedPackageWeight,
@@ -983,6 +1077,26 @@ export async function feedRoutes(app: FastifyInstance) {
       if (typeof data.name === "string") patch.name = data.name.trim();
       if (data.manufacturerName !== undefined) {
         patch.manufacturerName = data.manufacturerName?.trim() ? data.manufacturerName.trim() : null;
+      }
+      if (data.category !== undefined) {
+        const normalizedCategory = data.category
+          ? normalizeFeedComponentCategory(data.category)
+          : ("OTHER" as FeedComponentCategory);
+        if (!normalizedCategory) {
+          throw appError(400, "Invalid feed component category.");
+        }
+        patch.category = normalizedCategory;
+      }
+      if (data.deliveryMethod !== undefined) {
+        if (!data.deliveryMethod || !data.deliveryMethod.trim().length) {
+          patch.deliveryMethod = null;
+        } else {
+          const normalizedDeliveryMethod = normalizeFeedDeliveryMethod(data.deliveryMethod);
+          if (!normalizedDeliveryMethod) {
+            throw appError(400, "Invalid feed component delivery method.");
+          }
+          patch.deliveryMethod = normalizedDeliveryMethod;
+        }
       }
       if (data.unitType !== undefined) {
         patch.unitType = normalizeFeedUnitType(data.unitType);

@@ -50,7 +50,7 @@ import FeedComponentsPage from "./modules/supplies/pages/FeedComponentsPage";
 import FeedBlendsPage from "./modules/supplies/pages/FeedBlendsPage";
 import FeedPurchasesPage from "./modules/supplies/pages/FeedPurchasesPage";
 import FeedInventoryPage from "./modules/supplies/pages/FeedInventoryPage";
-import MineralSupplementsPage from "./modules/supplies/pages/MineralsPage";
+import AdditivesPage from "./modules/supplies/pages/AdditivesPage";
 import FuelSuppliesPage from "./modules/supplies/pages/FuelPage";
 import ToolsSuppliesPage from "./modules/supplies/pages/ToolsPage";
 
@@ -129,7 +129,8 @@ export const router = createBrowserRouter([
           { path: ROUTES.supplies.feedBlends, element: <FeedBlendsPage /> },
           { path: ROUTES.supplies.feedPurchases, element: <FeedPurchasesPage /> },
           { path: ROUTES.supplies.feedInventory, element: <FeedInventoryPage /> },
-          { path: ROUTES.supplies.minerals, element: <MineralSupplementsPage /> },
+          { path: ROUTES.supplies.additives, element: <AdditivesPage /> },
+          { path: ROUTES.supplies.minerals, element: <AdditivesPage /> },
           { path: ROUTES.supplies.fuel, element: <FuelSuppliesPage /> },
           { path: ROUTES.supplies.tools, element: <ToolsSuppliesPage /> },
 

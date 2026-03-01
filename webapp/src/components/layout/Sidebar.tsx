@@ -252,8 +252,8 @@ export function Sidebar() {
                   </div>
                 )}
 
-                <NavLink to={ROUTES.supplies.minerals} className={nestedLinkClasses}>
-                  Minerals
+                <NavLink to={ROUTES.supplies.additives} className={nestedLinkClasses}>
+                  Additives
                 </NavLink>
 
                 <NavLink to={ROUTES.supplies.medications} className={nestedLinkClasses}>

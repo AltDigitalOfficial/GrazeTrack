@@ -1,6 +1,21 @@
 import { z } from "zod";
 
 export const FeedUnitTypeSchema = z.enum(["WEIGHT", "COUNT", "VOLUME"]);
+export const FeedComponentCategorySchema = z.enum([
+  "FORAGE",
+  "GRAIN",
+  "MINERAL",
+  "SUPPLEMENT",
+  "ADDITIVE",
+  "OTHER",
+]);
+export const FeedDeliveryMethodSchema = z.enum([
+  "FREE_CHOICE",
+  "MIXED_IN_FEED",
+  "WATER",
+  "TOP_DRESS",
+  "OTHER",
+]);
 
 export const FeedSpeciesOptionsResponseSchema = z.object({
   species: z.array(z.string()),
@@ -22,6 +37,8 @@ export const FeedComponentRowSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
   manufacturerName: z.string().nullable().optional(),
+  category: z.union([FeedComponentCategorySchema, z.string()]),
+  deliveryMethod: z.union([FeedDeliveryMethodSchema, z.string()]).nullable().optional(),
   unitType: z.union([FeedUnitTypeSchema, z.string()]).nullable().optional(),
   defaultUnit: z.string(),
   defaultPackageWeight: z.string().nullable().optional(),

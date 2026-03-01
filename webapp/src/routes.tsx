@@ -51,6 +51,7 @@ export const ROUTES = {
     feedPurchases: "/supplies/feed/purchases",
     feedPurchaseDetail: "/supplies/feed/purchases/:purchaseId",
     feedInventory: "/supplies/feed/inventory",
+    additives: "/supplies/additives",
     minerals: "/supplies/minerals",
 
     medications: "/supplies/medications",

@@ -903,6 +903,8 @@ export const feedComponents = pgTable(
     defaultUnit: text("default_unit").notNull().default("lb"),
     defaultPackageWeight: decimal("default_package_weight"),
     defaultPackageUnit: text("default_package_unit"),
+    category: text("category").notNull().default("OTHER"),
+    deliveryMethod: text("delivery_method"),
     isBulkCommodity: boolean("is_bulk_commodity").notNull().default(false),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -912,6 +914,8 @@ export const feedComponents = pgTable(
     ranchIdx: index("feed_components_ranch_idx").on(t.ranchId),
     ranchNameIdx: index("feed_components_ranch_name_idx").on(t.ranchId, t.name),
     ranchUnitTypeIdx: index("feed_components_unit_type_idx").on(t.ranchId, t.unitType),
+    ranchCategoryIdx: index("feed_components_category_idx").on(t.ranchId, t.category),
+    ranchDeliveryMethodIdx: index("feed_components_delivery_method_idx").on(t.ranchId, t.deliveryMethod),
   })
 );
 

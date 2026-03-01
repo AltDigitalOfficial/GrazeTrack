@@ -40,7 +40,7 @@ import TractorsPage from "@/modules/hardware-management/pages/TractorsPage";
 ---------------------------- */
 import SuppliesOverviewPage from "@/modules/supplies/pages/SuppliesOverviewPage";
 import FeedPage from "@/modules/supplies/pages/FeedPage";
-import MineralsPage from "@/modules/supplies/pages/MineralsPage";
+import AdditivesPage from "@/modules/supplies/pages/AdditivesPage";
 import MedicationsPage from "@/modules/supplies/pages/MedicationsPage";
 import FuelPage from "@/modules/supplies/pages/FuelPage";
 import ToolsPage from "@/modules/supplies/pages/ToolsPage";
@@ -129,7 +129,8 @@ export default function App() {
         {/* SUPPLIES */}
         <Route path="/supplies" element={<SuppliesOverviewPage />} />
         <Route path="/supplies/feed" element={<FeedPage />} />
-        <Route path="/supplies/minerals" element={<MineralsPage />} />
+        <Route path="/supplies/additives" element={<AdditivesPage />} />
+        <Route path="/supplies/minerals" element={<AdditivesPage />} />
         <Route path="/supplies/medications" element={<MedicationsPage />} />
         <Route path="/supplies/fuel" element={<FuelPage />} />
         <Route path="/supplies/tools" element={<ToolsPage />} />
