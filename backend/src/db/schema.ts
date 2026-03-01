@@ -887,3 +887,217 @@ export const standardMedicationImages = pgTable(
     medIdx: index("standard_medication_images_med_idx").on(t.standardMedicationId),
   })
 );
+
+/* =========================================================================================
+ * Feed Management Module (v1)
+ * ========================================================================================= */
+
+export const feedComponents = pgTable(
+  "feed_components",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    name: text("name").notNull(),
+    manufacturerName: text("manufacturer_name"),
+    unitType: text("unit_type"),
+    defaultUnit: text("default_unit").notNull().default("lb"),
+    defaultPackageWeight: decimal("default_package_weight"),
+    defaultPackageUnit: text("default_package_unit"),
+    isBulkCommodity: boolean("is_bulk_commodity").notNull().default(false),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("feed_components_ranch_idx").on(t.ranchId),
+    ranchNameIdx: index("feed_components_ranch_name_idx").on(t.ranchId, t.name),
+    ranchUnitTypeIdx: index("feed_components_unit_type_idx").on(t.ranchId, t.unitType),
+  })
+);
+
+export const feedComponentEligibleSpecies = pgTable(
+  "feed_component_eligible_species",
+  {
+    ranchId: pgUuid("ranch_id").notNull(),
+    feedComponentId: pgUuid("feed_component_id").notNull(),
+    species: text("species").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.feedComponentId, t.species] }),
+    ranchIdx: index("feed_component_eligible_species_ranch_idx").on(t.ranchId),
+    lookupIdx: index("feed_component_eligible_species_lookup_idx").on(t.ranchId, t.feedComponentId, t.species),
+  })
+);
+
+export const feedBlends = pgTable(
+  "feed_blends",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    name: text("name").notNull(),
+    manufacturerName: text("manufacturer_name"),
+    unitType: text("unit_type"),
+    defaultUnit: text("default_unit").notNull().default("lb"),
+    defaultPackageWeight: decimal("default_package_weight"),
+    defaultPackageUnit: text("default_package_unit"),
+    isBulkCommodity: boolean("is_bulk_commodity").notNull().default(false),
+    notes: text("notes"),
+    currentVersionId: pgUuid("current_version_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("feed_blends_ranch_idx").on(t.ranchId),
+    ranchNameIdx: index("feed_blends_ranch_name_idx").on(t.ranchId, t.name),
+    ranchUnitTypeIdx: index("feed_blends_unit_type_idx").on(t.ranchId, t.unitType),
+  })
+);
+
+export const feedBlendEligibleSpecies = pgTable(
+  "feed_blend_eligible_species",
+  {
+    ranchId: pgUuid("ranch_id").notNull(),
+    feedBlendId: pgUuid("feed_blend_id").notNull(),
+    species: text("species").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.feedBlendId, t.species] }),
+    ranchIdx: index("feed_blend_eligible_species_ranch_idx").on(t.ranchId),
+    lookupIdx: index("feed_blend_eligible_species_lookup_idx").on(t.ranchId, t.feedBlendId, t.species),
+  })
+);
+
+export const feedBlendVersions = pgTable(
+  "feed_blend_versions",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    feedBlendId: pgUuid("feed_blend_id").notNull(),
+    versionNumber: integer("version_number").notNull(),
+    isCurrent: boolean("is_current").notNull().default(false),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueVersionIdx: uniqueIndex("feed_blend_versions_unique_idx").on(
+      t.ranchId,
+      t.feedBlendId,
+      t.versionNumber
+    ),
+    lookupIdx: index("feed_blend_versions_lookup_idx").on(
+      t.ranchId,
+      t.feedBlendId,
+      t.isCurrent,
+      t.createdAt
+    ),
+  })
+);
+
+export const feedBlendVersionItems = pgTable(
+  "feed_blend_version_items",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    feedBlendVersionId: pgUuid("feed_blend_version_id").notNull(),
+    feedComponentId: pgUuid("feed_component_id").notNull(),
+    percent: decimal("percent").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueItemIdx: uniqueIndex("feed_blend_version_items_unique_idx").on(
+      t.feedBlendVersionId,
+      t.feedComponentId
+    ),
+    lookupIdx: index("feed_blend_version_items_lookup_idx").on(t.ranchId, t.feedBlendVersionId),
+  })
+);
+
+export const feedPurchases = pgTable(
+  "feed_purchases",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    purchaseDate: date("purchase_date").notNull(),
+    supplierName: text("supplier_name"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    ranchIdx: index("feed_purchases_ranch_idx").on(t.ranchId),
+    dateIdx: index("feed_purchases_date_idx").on(t.purchaseDate),
+  })
+);
+
+export const feedPurchaseItems = pgTable(
+  "feed_purchase_items",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    feedPurchaseId: pgUuid("feed_purchase_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    feedComponentId: pgUuid("feed_component_id"),
+    feedBlendId: pgUuid("feed_blend_id"),
+    blendVersionId: pgUuid("blend_version_id"),
+    unitType: text("unit_type"),
+    quantity: decimal("quantity").notNull(),
+    unit: text("unit").notNull().default("lb"),
+    packageWeight: decimal("package_weight"),
+    packageWeightUnit: text("package_weight_unit"),
+    normalizedQuantity: decimal("normalized_quantity"),
+    normalizedUnit: text("normalized_unit"),
+    unitPrice: decimal("unit_price"),
+    lineTotal: decimal("line_total"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    purchaseIdx: index("feed_purchase_items_purchase_idx").on(t.feedPurchaseId),
+    ranchIdx: index("feed_purchase_items_ranch_idx").on(t.ranchId),
+    componentIdx: index("feed_purchase_items_component_idx").on(t.feedComponentId),
+    blendIdx: index("feed_purchase_items_blend_idx").on(t.feedBlendId),
+    unitTypeIdx: index("feed_purchase_items_unit_type_idx").on(t.ranchId, t.unitType),
+  })
+);
+
+export const feedInventoryBalances = pgTable(
+  "feed_inventory_balances",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    feedComponentId: pgUuid("feed_component_id"),
+    feedBlendId: pgUuid("feed_blend_id"),
+    quantityOnHand: decimal("quantity_on_hand").notNull().default("0"),
+    normalizedOnHandQuantity: decimal("normalized_on_hand_quantity"),
+    normalizedUnit: text("normalized_unit"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    lookupIdx: index("feed_inventory_balances_lookup_idx").on(t.ranchId, t.entityType, t.updatedAt),
+    normalizedIdx: index("feed_inventory_balances_normalized_idx").on(t.ranchId, t.normalizedUnit, t.updatedAt),
+  })
+);
+
+export const feedPhotos = pgTable(
+  "feed_photos",
+  {
+    id: pgUuid("id").primaryKey(),
+    ranchId: pgUuid("ranch_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: pgUuid("entity_id").notNull(),
+    filePath: text("file_path"),
+    storageUrl: text("storage_url"),
+    originalFilename: text("original_filename"),
+    mimeType: text("mime_type"),
+    fileSize: integer("file_size"),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).defaultNow().notNull(),
+    metadataJson: jsonb("metadata_json"),
+  },
+  (t) => ({
+    ranchIdx: index("feed_photos_ranch_idx").on(t.ranchId),
+    lookupIdx: index("feed_photos_lookup_idx").on(t.ranchId, t.entityType, t.entityId, t.uploadedAt),
+  })
+);

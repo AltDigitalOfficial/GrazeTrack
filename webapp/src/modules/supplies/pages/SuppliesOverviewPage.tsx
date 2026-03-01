@@ -11,7 +11,7 @@ export default function SuppliesOverviewPage() {
         <FeatureTileLink
           to={ROUTES.supplies.feed}
           title="Feed"
-          description="Track feed inventory, usage, and storage."
+          description="Manage feed components, blends, purchases, and inventory."
         />
         <FeatureTileLink
           to={ROUTES.supplies.minerals}

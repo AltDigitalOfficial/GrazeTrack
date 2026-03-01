@@ -26,6 +26,7 @@ export function Sidebar() {
   const servicesActive = location.pathname.startsWith(ROUTES.services.root);
   const tasksActive = location.pathname.startsWith(ROUTES.tasks.root);
   const adminActive = location.pathname.startsWith(ROUTES.admin.root);
+  const feedActive = location.pathname.startsWith("/supplies/feed");
 
   const linkClasses = ({ isActive }: { isActive: boolean }) =>
     `block px-2 py-1 rounded ${
@@ -39,6 +40,13 @@ export function Sidebar() {
       isActive
         ? "bg-green-100 text-green-800 font-semibold"
         : "text-stone-200 hover:bg-stone-600"
+    }`;
+
+  const subNestedLinkClasses = ({ isActive }: { isActive: boolean }) =>
+    `block px-2 py-1 rounded text-sm ml-8 ${
+      isActive
+        ? "bg-green-100 text-green-800 font-semibold"
+        : "text-stone-300 hover:bg-stone-600"
     }`;
 
   const handleLogout = async () => {
@@ -211,9 +219,38 @@ export function Sidebar() {
 
             {suppliesActive && (
               <div className="mt-1 space-y-1">
-                <NavLink to={ROUTES.supplies.feed} className={nestedLinkClasses}>
+                <NavLink
+                  to={ROUTES.supplies.feed}
+                  className={({ isActive }) =>
+                    `block px-2 py-1 rounded text-sm ml-4 font-semibold ${
+                      feedActive || isActive
+                        ? "bg-green-100 text-green-800"
+                        : "text-stone-200 hover:bg-stone-600"
+                    }`
+                  }
+                >
                   Feed
                 </NavLink>
+
+                {feedActive && (
+                  <div className="space-y-1">
+                    <NavLink to={ROUTES.supplies.feedComponents} className={subNestedLinkClasses}>
+                      Components
+                    </NavLink>
+
+                    <NavLink to={ROUTES.supplies.feedBlends} className={subNestedLinkClasses}>
+                      Blends
+                    </NavLink>
+
+                    <NavLink to={ROUTES.supplies.feedPurchases} className={subNestedLinkClasses}>
+                      Purchases
+                    </NavLink>
+
+                    <NavLink to={ROUTES.supplies.feedInventory} className={subNestedLinkClasses}>
+                      Inventory
+                    </NavLink>
+                  </div>
+                )}
 
                 <NavLink to={ROUTES.supplies.minerals} className={nestedLinkClasses}>
                   Minerals

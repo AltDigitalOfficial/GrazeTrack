@@ -45,7 +45,12 @@ export const ROUTES = {
 
   supplies: {
     root: "/supplies",
-    feed: "/supplies/feed",
+    feed: "/supplies/feed/components",
+    feedComponents: "/supplies/feed/components",
+    feedBlends: "/supplies/feed/blends",
+    feedPurchases: "/supplies/feed/purchases",
+    feedPurchaseDetail: "/supplies/feed/purchases/:purchaseId",
+    feedInventory: "/supplies/feed/inventory",
     minerals: "/supplies/minerals",
 
     medications: "/supplies/medications",

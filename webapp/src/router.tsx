@@ -46,7 +46,10 @@ import CreateStandardMedicationPage from "./modules/supplies/pages/CreateStandar
 import CreateMedicationPurchasePage from "./modules/supplies/pages/CreateMedicationPurchasePage";
 import MedicationHistoryPage from "./modules/supplies/pages/MedicationHistoryPage";
 import MedicationPurchaseDetailPage from "./modules/supplies/pages/MedicationPurchaseDetailPage";
-import FeedSuppliesPage from "./modules/supplies/pages/FeedPage";
+import FeedComponentsPage from "./modules/supplies/pages/FeedComponentsPage";
+import FeedBlendsPage from "./modules/supplies/pages/FeedBlendsPage";
+import FeedPurchasesPage from "./modules/supplies/pages/FeedPurchasesPage";
+import FeedInventoryPage from "./modules/supplies/pages/FeedInventoryPage";
 import MineralSupplementsPage from "./modules/supplies/pages/MineralsPage";
 import FuelSuppliesPage from "./modules/supplies/pages/FuelPage";
 import ToolsSuppliesPage from "./modules/supplies/pages/ToolsPage";
@@ -121,7 +124,11 @@ export const router = createBrowserRouter([
 
           // Supplies
           { path: ROUTES.supplies.root, element: <SuppliesOverviewPage /> },
-          { path: ROUTES.supplies.feed, element: <FeedSuppliesPage /> },
+          { path: ROUTES.supplies.feed, element: <FeedComponentsPage /> },
+          { path: ROUTES.supplies.feedComponents, element: <FeedComponentsPage /> },
+          { path: ROUTES.supplies.feedBlends, element: <FeedBlendsPage /> },
+          { path: ROUTES.supplies.feedPurchases, element: <FeedPurchasesPage /> },
+          { path: ROUTES.supplies.feedInventory, element: <FeedInventoryPage /> },
           { path: ROUTES.supplies.minerals, element: <MineralSupplementsPage /> },
           { path: ROUTES.supplies.fuel, element: <FuelSuppliesPage /> },
           { path: ROUTES.supplies.tools, element: <ToolsSuppliesPage /> },
