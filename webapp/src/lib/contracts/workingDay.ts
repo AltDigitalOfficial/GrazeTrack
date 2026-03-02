@@ -160,6 +160,23 @@ export const WorkingDaySupplyReadinessNeedSchema = z.object({
   notes: z.string().nullable().optional(),
 });
 
+export const WorkingDaySupplyInventoryLineStatusSchema = z.enum(["OK", "LOW", "SHORT", "UNKNOWN"]);
+
+export const WorkingDaySupplyInventoryLineSchema = z.object({
+  supplyType: z.union([WorkingDaySupplyTypeSchema, z.string()]),
+  linkedEntityType: z.string().nullable().optional(),
+  linkedEntityId: z.string().uuid().nullable().optional(),
+  name: z.string(),
+  requiredQuantity: NumericLikeSchema.nullable().optional(),
+  requiredUnit: z.string().nullable().optional(),
+  onHandQuantity: NumericLikeSchema.nullable().optional(),
+  onHandUnit: z.string().nullable().optional(),
+  status: z.union([WorkingDaySupplyInventoryLineStatusSchema, z.string()]),
+  message: z.string(),
+  sourceNeeds: z.number().int().optional(),
+  sourceItems: z.number().int().optional(),
+});
+
 export const WorkingDayEquipmentReadinessNeedSchema = z.object({
   id: z.string().uuid(),
   planItemId: z.string().uuid(),
@@ -191,6 +208,17 @@ export const WorkingDayPlanResponseSchema = z.object({
         unknown: z.number(),
         noRequiredQuantity: z.number(),
       }),
+      lines: z.array(WorkingDaySupplyInventoryLineSchema).optional().default([]),
+      lineSummary: z
+        .object({
+          total: z.number(),
+          ok: z.number(),
+          low: z.number(),
+          short: z.number(),
+          unknown: z.number(),
+        })
+        .optional()
+        .default({ total: 0, ok: 0, low: 0, short: 0, unknown: 0 }),
     }),
     equipment: z.object({
       needs: z.array(WorkingDayEquipmentReadinessNeedSchema),
@@ -276,6 +304,7 @@ export type WorkingDayPlanItem = z.infer<typeof WorkingDayPlanItemSchema>;
 export type WorkingDayPlanItemSupplyNeed = z.infer<typeof WorkingDayPlanItemSupplyNeedSchema>;
 export type WorkingDayPlanItemEquipmentNeed = z.infer<typeof WorkingDayPlanItemEquipmentNeedSchema>;
 export type WorkingDaySupplyReadinessNeed = z.infer<typeof WorkingDaySupplyReadinessNeedSchema>;
+export type WorkingDaySupplyInventoryLine = z.infer<typeof WorkingDaySupplyInventoryLineSchema>;
 export type WorkingDayEquipmentReadinessNeed = z.infer<typeof WorkingDayEquipmentReadinessNeedSchema>;
 export type WorkingDayPlanResponse = z.infer<typeof WorkingDayPlanResponseSchema>;
 export type WorkingDayPlanInventoryRow = z.infer<typeof WorkingDayPlanInventoryRowSchema>;

@@ -38,6 +38,7 @@ type WorkingDayCategory = z.infer<typeof WorkingDayPlanCategorySchema>;
 type WorkingDayItemStatus = z.infer<typeof WorkingDayPlanItemStatusSchema>;
 type WorkingDaySupplyType = z.infer<typeof WorkingDaySupplyTypeSchema>;
 type SupplyReadinessStatus = "READY" | "SHORT" | "UNKNOWN" | "NO_REQUIRED_QUANTITY";
+type SupplyInventoryLineStatus = "OK" | "LOW" | "SHORT" | "UNKNOWN";
 type EquipmentReadinessStatus = "READY" | "NOT_OPERATIONAL" | "NEEDS_SERVICE" | "UNKNOWN" | "UNLINKED";
 
 const PLAN_CATEGORIES = new Set<WorkingDayCategory>(WorkingDayPlanCategorySchema.options as readonly WorkingDayCategory[]);
@@ -167,6 +168,18 @@ function toNumeric(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function normalizeUnit(value: unknown): string | null {
+  const unit = String(value ?? "").trim();
+  return unit.length ? unit.toLowerCase() : null;
+}
+
+function evaluateInventoryLineStatus(requiredQuantity: number | null, onHandQuantity: number | null): SupplyInventoryLineStatus {
+  if (requiredQuantity === null || onHandQuantity === null) return "UNKNOWN";
+  if (onHandQuantity < requiredQuantity) return "SHORT";
+  if (onHandQuantity < requiredQuantity * 1.1) return "LOW";
+  return "OK";
 }
 
 function normalizeWeightUnit(unit: unknown): "lb" | "kg" | null {
@@ -668,7 +681,141 @@ async function computeSupplyReadiness(ranchId: string, supplyNeeds: Array<typeof
     noRequiredQuantity: rows.filter((r) => r.status === "NO_REQUIRED_QUANTITY").length,
   };
 
-  return { needs: rows, summary };
+  const grouped = new Map<
+    string,
+    {
+      supplyType: string;
+      linkedEntityType: string | null;
+      linkedEntityId: string | null;
+      name: string;
+      requiredQuantity: number | null;
+      requiredUnit: string | null;
+      requiredUnitNormalized: string | null;
+      onHandQuantity: number | null;
+      onHandUnit: string | null;
+      onHandUnitNormalized: string | null;
+      sourceNeeds: number;
+      planItemIds: Set<string>;
+      notes: string[];
+    }
+  >();
+
+  for (const row of rows) {
+    const requiredQuantity = toNumeric(row.requiredQuantity);
+    const requiredUnit = row.unit?.trim() ? row.unit.trim() : null;
+    const requiredUnitNormalized = normalizeUnit(requiredUnit);
+    const onHandQuantity = toNumeric(row.onHandQuantity);
+    const onHandUnit = row.onHandUnit?.trim() ? row.onHandUnit.trim() : null;
+    const onHandUnitNormalized = normalizeUnit(onHandUnit);
+    const key = [
+      row.supplyType,
+      row.linkedEntityType ?? "",
+      row.linkedEntityId ?? "",
+      row.name.trim().toLowerCase(),
+      requiredUnitNormalized ?? "",
+      onHandUnitNormalized ?? "",
+    ].join("|");
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, {
+        supplyType: row.supplyType,
+        linkedEntityType: row.linkedEntityType ?? null,
+        linkedEntityId: row.linkedEntityId ?? null,
+        name: row.name,
+        requiredQuantity,
+        requiredUnit,
+        requiredUnitNormalized,
+        onHandQuantity,
+        onHandUnit,
+        onHandUnitNormalized,
+        sourceNeeds: 1,
+        planItemIds: new Set([row.planItemId]),
+        notes: [],
+      });
+      continue;
+    }
+
+    existing.sourceNeeds += 1;
+    existing.planItemIds.add(row.planItemId);
+
+    if (requiredQuantity !== null) {
+      if (existing.requiredQuantity === null) {
+        existing.notes.push("Some required quantities could not be summed.");
+      } else if (existing.requiredUnitNormalized !== requiredUnitNormalized) {
+        existing.requiredQuantity = null;
+        existing.requiredUnit = null;
+        existing.requiredUnitNormalized = null;
+        existing.notes.push("Mixed required units across grouped needs.");
+      } else {
+        existing.requiredQuantity += requiredQuantity;
+      }
+    } else {
+      existing.requiredQuantity = null;
+      existing.notes.push("At least one grouped need has no required quantity.");
+    }
+
+    if (onHandQuantity === null) {
+      existing.onHandQuantity = null;
+    } else if (existing.onHandQuantity !== null && Math.abs(existing.onHandQuantity - onHandQuantity) > 0.0001) {
+      existing.onHandQuantity = null;
+      existing.notes.push("On-hand quantity varies across grouped needs.");
+    } else if (existing.onHandQuantity === null) {
+      existing.onHandQuantity = onHandQuantity;
+    }
+
+    if (existing.onHandUnitNormalized !== onHandUnitNormalized) {
+      existing.onHandUnit = null;
+      existing.onHandUnitNormalized = null;
+      if (onHandUnitNormalized || existing.onHandUnitNormalized) existing.notes.push("On-hand units differ across grouped needs.");
+    }
+  }
+
+  const lines = Array.from(grouped.values())
+    .map((line) => {
+      const status = evaluateInventoryLineStatus(line.requiredQuantity, line.onHandQuantity);
+      let message = "Inventory status unknown.";
+      if (status === "OK") {
+        message = "On hand is sufficient.";
+      } else if (status === "LOW") {
+        message = "On hand is sufficient but close to required quantity.";
+      } else if (status === "SHORT") {
+        const shortage = (line.requiredQuantity ?? 0) - (line.onHandQuantity ?? 0);
+        const unitLabel = line.requiredUnit ?? line.onHandUnit ?? "";
+        message = `Short by ${decimalString(shortage, 2)}${unitLabel ? ` ${unitLabel}` : ""}.`;
+      } else if (line.requiredQuantity === null) {
+        message = "Required quantity is not fully known.";
+      } else if (line.onHandQuantity === null) {
+        message = "On-hand quantity is unknown.";
+      }
+      if (line.notes.length) {
+        message = `${message} ${Array.from(new Set(line.notes)).join(" ")}`.trim();
+      }
+      return {
+        supplyType: line.supplyType,
+        linkedEntityType: line.linkedEntityType,
+        linkedEntityId: line.linkedEntityId,
+        name: line.name,
+        requiredQuantity: line.requiredQuantity === null ? null : decimalString(line.requiredQuantity, 2),
+        requiredUnit: line.requiredUnit,
+        onHandQuantity: line.onHandQuantity === null ? null : decimalString(line.onHandQuantity, 2),
+        onHandUnit: line.onHandUnit,
+        status,
+        message,
+        sourceNeeds: line.sourceNeeds,
+        sourceItems: line.planItemIds.size,
+      };
+    })
+    .sort((a, b) => String(a.supplyType).localeCompare(String(b.supplyType)) || a.name.localeCompare(b.name));
+
+  const lineSummary = {
+    total: lines.length,
+    ok: lines.filter((line) => line.status === "OK").length,
+    low: lines.filter((line) => line.status === "LOW").length,
+    short: lines.filter((line) => line.status === "SHORT").length,
+    unknown: lines.filter((line) => line.status === "UNKNOWN").length,
+  };
+
+  return { needs: rows, summary, lines, lineSummary };
 }
 
 async function computeEquipmentReadiness(

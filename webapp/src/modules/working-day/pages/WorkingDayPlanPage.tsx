@@ -15,6 +15,8 @@ import {
   WorkingDaySupplyOptionsPartsResponseSchema,
   WorkingDaySupplyNeedResponseSchema,
   type WorkingDayPlanCategory,
+  type WorkingDaySupplyInventoryLine,
+  type WorkingDaySupplyReadinessNeed,
   type WorkingDayPlanInventoryResponse,
   type WorkingDayPlanItem,
   type WorkingDayPlanItemStatus,
@@ -247,6 +249,49 @@ function parsePositiveNumber(value: string): number | null {
   return n;
 }
 
+function supplyInventoryStatusLabel(status: string): "OK" | "Low" | "Short" | "Unknown" {
+  const normalized = status.trim().toUpperCase();
+  if (normalized === "OK") return "OK";
+  if (normalized === "LOW") return "Low";
+  if (normalized === "SHORT") return "Short";
+  return "Unknown";
+}
+
+function supplyInventoryStatusTone(status: string): string {
+  const normalized = status.trim().toUpperCase();
+  if (normalized === "OK") return "text-green-700";
+  if (normalized === "LOW") return "text-amber-700";
+  if (normalized === "SHORT") return "text-red-700";
+  return "text-stone-600";
+}
+
+function fallbackSupplyInventoryStatusFromNeed(status: string): "OK" | "LOW" | "SHORT" | "UNKNOWN" {
+  const normalized = status.trim().toUpperCase();
+  if (normalized === "READY") return "OK";
+  if (normalized === "SHORT") return "SHORT";
+  return "UNKNOWN";
+}
+
+function fallbackSupplyInventoryLinesFromNeeds(
+  needs: WorkingDaySupplyReadinessNeed[] | null | undefined
+): WorkingDaySupplyInventoryLine[] {
+  if (!needs?.length) return [];
+  return needs.map((need) => ({
+    supplyType: String(need.supplyType ?? "OTHER"),
+    linkedEntityType: need.linkedEntityType ?? null,
+    linkedEntityId: need.linkedEntityId ?? null,
+    name: need.name,
+    requiredQuantity: need.requiredQuantity ?? null,
+    requiredUnit: need.unit ?? null,
+    onHandQuantity: need.onHandQuantity ?? null,
+    onHandUnit: need.onHandUnit ?? null,
+    status: fallbackSupplyInventoryStatusFromNeed(String(need.status ?? "UNKNOWN")),
+    message: need.message,
+    sourceNeeds: 1,
+    sourceItems: 1,
+  }));
+}
+
 export default function WorkingDayPlanPage() {
   const { toast } = useToast();
   const { activeRanchId, loading: ranchLoading } = useRanch();
@@ -321,6 +366,33 @@ export default function WorkingDayPlanPage() {
     () => new Map((planData?.readiness.supplies.needs ?? []).map((need) => [need.id, need])),
     [planData?.readiness.supplies.needs]
   );
+  const supplyInventoryLines = useMemo(() => {
+    const lines = planData?.readiness.supplies.lines ?? [];
+    if (lines.length) return lines;
+    return fallbackSupplyInventoryLinesFromNeeds(planData?.readiness.supplies.needs);
+  }, [planData?.readiness.supplies.lines, planData?.readiness.supplies.needs]);
+  const supplyInventorySummary = useMemo(
+    () => ({
+      total: supplyInventoryLines.length,
+      ok: supplyInventoryLines.filter((line) => String(line.status ?? "").trim().toUpperCase() === "OK").length,
+      low: supplyInventoryLines.filter((line) => String(line.status ?? "").trim().toUpperCase() === "LOW").length,
+      short: supplyInventoryLines.filter((line) => String(line.status ?? "").trim().toUpperCase() === "SHORT").length,
+      unknown: supplyInventoryLines.filter((line) => String(line.status ?? "").trim().toUpperCase() === "UNKNOWN").length,
+    }),
+    [supplyInventoryLines]
+  );
+  const supplyInventoryGroups = useMemo(() => {
+    const byType = new Map<string, typeof supplyInventoryLines>();
+    for (const line of supplyInventoryLines) {
+      const key = String(line.supplyType ?? "OTHER");
+      const bucket = byType.get(key) ?? [];
+      bucket.push(line);
+      byType.set(key, bucket);
+    }
+    return Array.from(byType.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([supplyType, lines]) => ({ supplyType, lines }));
+  }, [supplyInventoryLines]);
   const activeGuidedTagPart = useMemo(
     () => tagPartOptions.find((part) => part.id === selectedTagPartId) ?? null,
     [tagPartOptions, selectedTagPartId]
@@ -1304,6 +1376,56 @@ export default function WorkingDayPlanPage() {
                 Equipment: ready {planData?.readiness.equipment.summary.ready ?? 0}, blocked{" "}
                 {planData?.readiness.equipment.summary.blocked ?? 0}, unknown {planData?.readiness.equipment.summary.unknown ?? 0}
               </div>
+            </div>
+          </Card>
+
+          <Card title="Supply Inventory Check" description="Aggregated required vs on-hand for this plan.">
+            <div className="space-y-3">
+              <div className="text-xs text-stone-600">
+                {supplyInventorySummary.total} lines | OK {supplyInventorySummary.ok} | Low {supplyInventorySummary.low} | Short{" "}
+                {supplyInventorySummary.short} | Unknown {supplyInventorySummary.unknown}
+              </div>
+              {supplyInventoryLines.length === 0 ? (
+                <div className="text-sm text-stone-500">No supply requirements yet.</div>
+              ) : (
+                <div className="space-y-3">
+                  {supplyInventoryGroups.map((group) => (
+                    <div key={group.supplyType} className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{enumLabel(group.supplyType)}</div>
+                      <div className="space-y-2">
+                        {group.lines.map((line, lineIdx) => {
+                          const statusLabel = supplyInventoryStatusLabel(String(line.status ?? "UNKNOWN"));
+                          const statusTone = supplyInventoryStatusTone(String(line.status ?? "UNKNOWN"));
+                          const statusClass =
+                            statusLabel === "Short"
+                              ? "border-red-300 bg-red-50"
+                              : statusLabel === "Low"
+                              ? "border-amber-300 bg-amber-50"
+                              : statusLabel === "OK"
+                              ? "border-green-300 bg-green-50"
+                              : "border-stone-200 bg-stone-50";
+                          return (
+                            <div key={`${group.supplyType}-${line.name}-${line.linkedEntityId ?? "na"}-${lineIdx}`} className={`rounded border p-2 ${statusClass}`}>
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="text-sm font-medium text-stone-800">{line.name}</div>
+                                  <div className="text-xs text-stone-600">
+                                    Required: {line.requiredQuantity ?? "-"} {line.requiredUnit ?? ""}
+                                    {" | "}
+                                    On hand: {line.onHandQuantity ?? "-"} {line.onHandUnit ?? ""}
+                                  </div>
+                                  <div className="text-xs text-stone-600 mt-1">{line.message}</div>
+                                </div>
+                                <div className={`text-xs font-semibold ${statusTone}`}>{statusLabel}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </Card>
 
