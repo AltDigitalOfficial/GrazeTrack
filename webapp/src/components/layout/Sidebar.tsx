@@ -20,6 +20,7 @@ export function Sidebar() {
 
   // Active section detection (match ROUTES prefixes)
   const herdActive = location.pathname.startsWith(ROUTES.herd.root);
+  const workingDayActive = location.pathname.startsWith(ROUTES.workingDay.root);
   const landActive = location.pathname.startsWith(ROUTES.land.root);
   const hardwareActive = location.pathname.startsWith("/hardware");
   const suppliesActive = location.pathname.startsWith(ROUTES.supplies.root);
@@ -105,6 +106,20 @@ export function Sidebar() {
           {/* RANCH OVERVIEW */}
           <NavLink to={ROUTES.ranch.overview} className={linkClasses}>
             Ranch Overview
+          </NavLink>
+
+          {/* WORKING DAY PLAN */}
+          <NavLink
+            to={ROUTES.workingDay.plan}
+            className={({ isActive }) =>
+              `block px-2 py-1 rounded font-semibold ${
+                workingDayActive || isActive
+                  ? "bg-green-100 text-green-800"
+                  : "text-stone-100 hover:bg-stone-700"
+              }`
+            }
+          >
+            Working Day Plan
           </NavLink>
 
           {/* HERD MANAGEMENT */}

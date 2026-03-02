@@ -16,6 +16,7 @@ import AccountingPage from "./modules/admin/pages/AccountingPage";
 
 // Ranch
 import RanchOverviewPage from "./modules/ranch/pages/RanchOverviewPage";
+import WorkingDayPlanPage from "./modules/working-day/pages/WorkingDayPlanPage";
 
 // Herd
 import ListHerdPage from "./modules/herd-management/pages/ListHerdPage";
@@ -96,6 +97,7 @@ export const router = createBrowserRouter([
           // Ranch overview
           { index: true, element: <RanchOverviewPage /> },
           { path: ROUTES.ranch.overview, element: <RanchOverviewPage /> },
+          { path: ROUTES.workingDay.plan, element: <WorkingDayPlanPage /> },
 
           // Herd
           { path: ROUTES.herd.list, element: <ListHerdPage /> },

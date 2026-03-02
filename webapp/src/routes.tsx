@@ -8,6 +8,11 @@ export const ROUTES = {
     overview: "/",
   },
 
+  workingDay: {
+    root: "/working-day",
+    plan: "/working-day",
+  },
+
   herd: {
     root: "/herd",
     list: "/herd",

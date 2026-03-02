@@ -16,6 +16,7 @@ import { feedRoutes } from "./routes/feed";
 import { fuelRoutes } from "./routes/fuel";
 import { equipmentRoutes } from "./routes/equipment";
 import { animalsRoutes } from "./routes/animals";
+import { workingDayRoutes } from "./routes/workingDay";
 
 async function start() {
   const app = Fastify({
@@ -55,6 +56,7 @@ async function start() {
   app.register(fuelRoutes, { prefix: "/api" });
   app.register(equipmentRoutes, { prefix: "/api" });
   app.register(animalsRoutes, { prefix: "/api" });
+  app.register(workingDayRoutes, { prefix: "/api" });
   
   try {
     await app.listen({ port: config.API_PORT, host: config.API_HOST });

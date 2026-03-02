@@ -174,7 +174,7 @@ VALUES
     'ANIMAL_WORK',
     'TAG_ID',
     'Tag / ID',
-    '[{"supplyType":"PART_SUPPLY","name":"Tags and ID supplies"}]'::jsonb,
+    '[{"supplyType":"PART_SUPPLY","name":"Tags and ID supplies","requiredQuantity":1,"unit":"each"}]'::jsonb,
     '[{"assetTypeHint":"Handling setup","mustBeOperational":true}]'::jsonb,
     true,
     110,
