@@ -60,6 +60,8 @@ const PART_CATEGORIES: EquipmentPartCategory[] = [
   "LIVESTOCK_HANDLING",
   "IMPLEMENT_PART",
   "VEHICLE_PART",
+  "IDENTIFICATION",
+  "MED_SUPPLIES",
   "OTHER",
 ];
 

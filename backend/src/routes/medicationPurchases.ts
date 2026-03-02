@@ -59,6 +59,18 @@ function formatDoseText(amount: string, unit: string, perAmount: string, perUnit
   return `${amount} ${unit} per ${perAmount} ${perUnit}`;
 }
 
+const MEDICATION_PURPOSE_VALUES = [
+  "VACCINATION",
+  "ANTIBIOTIC",
+  "DEWORMER",
+  "ANTI_INFLAMMATORY",
+  "VITAMIN_SUPPLEMENT",
+  "TOPICAL_WOUND",
+  "OTHER",
+] as const;
+
+const DOSING_BASIS_VALUES = ["PER_HEAD", "PER_WEIGHT"] as const;
+
 async function parseMultipartRequest(req: any): Promise<{
   body: Record<string, any>;
   files: any[];
@@ -131,6 +143,11 @@ const CreatePurchaseBody = z.object({
         concentrationUnit: z.string().optional().nullable(),
         manufacturerName: z.string().min(1),
         brandName: z.string().min(1),
+        purpose: z.enum(MEDICATION_PURPOSE_VALUES).optional(),
+        dosingBasis: z.enum(DOSING_BASIS_VALUES).optional().nullable(),
+        doseValue: decimalInputSchema().optional().nullable(),
+        doseUnit: z.string().optional().nullable(),
+        doseWeightUnit: z.string().optional().nullable(),
         onLabelDoseText: z.string().optional().nullable(),
         applicableSpecies: z.array(z.string().min(1)).optional(),
         onLabelDoseAmount: decimalInputSchema().optional().nullable(),
@@ -341,6 +358,20 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
         const medId = crypto.randomUUID();
         const standardId = crypto.randomUUID();
         const startDate = newMed.standard.startDate ?? todayIsoDate();
+        const rawDosingBasis = newMed.dosingBasis ?? null;
+        const rawDoseValue = toNullableDecimalString(newMed.doseValue);
+        const rawDoseUnit = newMed.doseUnit?.trim() ? newMed.doseUnit.trim() : null;
+        const rawDoseWeightUnit = newMed.doseWeightUnit?.trim() ? newMed.doseWeightUnit.trim() : null;
+        const dosingBasis =
+          rawDosingBasis === "PER_WEIGHT"
+            ? rawDoseValue && rawDoseUnit && rawDoseWeightUnit
+              ? "PER_WEIGHT"
+              : null
+            : rawDosingBasis === "PER_HEAD"
+              ? rawDoseValue && rawDoseUnit
+                ? "PER_HEAD"
+                : null
+              : null;
         const standardDoseText =
           newMed.standard.standardDoseText && newMed.standard.standardDoseText.trim().length > 0
             ? newMed.standard.standardDoseText.trim()
@@ -378,6 +409,11 @@ export async function medicationPurchasesRoutes(app: FastifyInstance) {
             concentrationUnit: newMed.concentrationUnit ?? null,
             manufacturerName: newMed.manufacturerName,
             brandName: newMed.brandName,
+            purpose: newMed.purpose ?? "OTHER",
+            dosingBasis,
+            doseValue: dosingBasis ? rawDoseValue : null,
+            doseUnit: dosingBasis ? rawDoseUnit : null,
+            doseWeightUnit: dosingBasis === "PER_WEIGHT" ? rawDoseWeightUnit : null,
             onLabelDoseText,
             applicableSpecies: newMed.applicableSpecies ?? [],
             onLabelDoseAmount: toNullableDecimalString(newMed.onLabelDoseAmount),

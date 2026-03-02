@@ -44,6 +44,8 @@ type EquipmentPartCategory =
   | "LIVESTOCK_HANDLING"
   | "IMPLEMENT_PART"
   | "VEHICLE_PART"
+  | "IDENTIFICATION"
+  | "MED_SUPPLIES"
   | "OTHER";
 type EquipmentPartUnitType = "COUNT" | "LENGTH" | "WEIGHT";
 type EquipmentPartEventType = "PURCHASE" | "ADJUSTMENT" | "USE" | "OTHER";
@@ -89,6 +91,8 @@ const PART_CATEGORIES = new Set<EquipmentPartCategory>([
   "LIVESTOCK_HANDLING",
   "IMPLEMENT_PART",
   "VEHICLE_PART",
+  "IDENTIFICATION",
+  "MED_SUPPLIES",
   "OTHER",
 ]);
 const PART_UNIT_TYPES = new Set<EquipmentPartUnitType>(["COUNT", "LENGTH", "WEIGHT"]);

@@ -750,6 +750,13 @@ export const standardMedications = pgTable(
     manufacturerName: text("manufacturer_name").notNull(),
     brandName: text("brand_name").notNull(),
 
+    // Working-day medication matching + quantity estimation metadata
+    purpose: text("purpose").notNull().default("OTHER"),
+    dosingBasis: text("dosing_basis"),
+    doseValue: decimal("dose_value"),
+    doseUnit: text("dose_unit"),
+    doseWeightUnit: text("dose_weight_unit"),
+
     onLabelDoseText: text("on_label_dose_text"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

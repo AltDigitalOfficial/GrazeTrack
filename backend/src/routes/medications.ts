@@ -74,6 +74,18 @@ function canonicalUnitFromFormat(format: string): string {
   }
 }
 
+const MEDICATION_PURPOSE_VALUES = [
+  "VACCINATION",
+  "ANTIBIOTIC",
+  "DEWORMER",
+  "ANTI_INFLAMMATORY",
+  "VITAMIN_SUPPLEMENT",
+  "TOPICAL_WOUND",
+  "OTHER",
+] as const;
+
+const DOSING_BASIS_VALUES = ["PER_HEAD", "PER_WEIGHT"] as const;
+
 function buildDisplayName(m: {
   chemicalName: string;
   brandName: string;
@@ -180,6 +192,12 @@ const CreateStandardMedicationBody = z.object({
 
   manufacturerName: z.string().min(1),
   brandName: z.string().min(1),
+  purpose: z.enum(MEDICATION_PURPOSE_VALUES).optional().default("OTHER"),
+
+  dosingBasis: z.enum(DOSING_BASIS_VALUES).optional().nullable(),
+  doseValue: decimalInputSchema().optional().nullable(),
+  doseUnit: z.string().optional().nullable(),
+  doseWeightUnit: z.string().optional().nullable(),
 
   onLabelDoseText: z.string().optional().nullable(),
   applicableSpecies: z.array(z.string().min(1)).optional(),
@@ -227,6 +245,62 @@ const CreateStandardMedicationBody = z.object({
       message: "On-label structured dosing requires amount/unit and per-amount/per-unit.",
       path: ["onLabelDoseAmount"],
     });
+  }
+
+  const dosingParts = [data.dosingBasis, data.doseValue, data.doseUnit, data.doseWeightUnit];
+  const hasAnyDosing = dosingParts.some((v) => v != null && String(v).trim().length > 0);
+  if (hasAnyDosing) {
+    if (!data.dosingBasis) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Dosing basis is required when dosing fields are provided.",
+        path: ["dosingBasis"],
+      });
+    } else if (data.dosingBasis === "PER_HEAD") {
+      if (data.doseValue == null || String(data.doseValue).trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Dose value is required for per-head dosing.",
+          path: ["doseValue"],
+        });
+      }
+      if (data.doseUnit == null || String(data.doseUnit).trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Dose unit is required for per-head dosing.",
+          path: ["doseUnit"],
+        });
+      }
+      if (data.doseWeightUnit != null && String(data.doseWeightUnit).trim().length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Weight unit applies only to per-weight dosing.",
+          path: ["doseWeightUnit"],
+        });
+      }
+    } else if (data.dosingBasis === "PER_WEIGHT") {
+      if (data.doseValue == null || String(data.doseValue).trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Dose value is required for per-weight dosing.",
+          path: ["doseValue"],
+        });
+      }
+      if (data.doseUnit == null || String(data.doseUnit).trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Dose unit is required for per-weight dosing.",
+          path: ["doseUnit"],
+        });
+      }
+      if (data.doseWeightUnit == null || String(data.doseWeightUnit).trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Weight unit is required for per-weight dosing.",
+          path: ["doseWeightUnit"],
+        });
+      }
+    }
   }
 
   if (data.speciesStandards && data.speciesStandards.length > 0) {
@@ -334,6 +408,14 @@ export async function medicationsRoutes(app: FastifyInstance) {
                 String(data.onLabelPerUnit)
               )
             : null;
+      const purpose = data.purpose ?? "OTHER";
+      const dosingBasis = data.dosingBasis ?? null;
+      const doseValue = toNullableDecimalString(data.doseValue);
+      const doseUnit = data.doseUnit && data.doseUnit.trim().length > 0 ? data.doseUnit.trim() : null;
+      const doseWeightUnit =
+        dosingBasis === "PER_WEIGHT" && data.doseWeightUnit && data.doseWeightUnit.trim().length > 0
+          ? data.doseWeightUnit.trim()
+          : null;
       const standardsInput =
         data.speciesStandards && data.speciesStandards.length > 0
           ? data.speciesStandards.map((row) => ({
@@ -400,6 +482,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
           concentrationUnit: data.concentrationUnit ?? null,
           manufacturerName: data.manufacturerName,
           brandName: data.brandName,
+          purpose,
+          dosingBasis,
+          doseValue,
+          doseUnit,
+          doseWeightUnit,
           onLabelDoseText,
           applicableSpecies: data.applicableSpecies ?? [],
           onLabelDoseAmount: toNullableDecimalString(data.onLabelDoseAmount),
@@ -480,6 +567,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
                 : String(data.concentrationValue),
             concentrationUnit: data.concentrationUnit ?? null,
           }),
+          purpose,
+          dosingBasis,
+          doseValue,
+          doseUnit,
+          doseWeightUnit,
           currentStandard: createdStandards[0] ?? null,
           currentStandards: createdStandards,
         },
@@ -504,6 +596,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
           concentrationUnit: standardMedications.concentrationUnit,
           manufacturerName: standardMedications.manufacturerName,
           brandName: standardMedications.brandName,
+          purpose: standardMedications.purpose,
+          dosingBasis: standardMedications.dosingBasis,
+          doseValue: standardMedications.doseValue,
+          doseUnit: standardMedications.doseUnit,
+          doseWeightUnit: standardMedications.doseWeightUnit,
           onLabelDoseText: standardMedications.onLabelDoseText,
           onLabelDoseAmount: standardMedications.onLabelDoseAmount,
           onLabelDoseUnit: standardMedications.onLabelDoseUnit,
@@ -544,6 +641,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
           concentrationUnit: string | null;
           manufacturerName: string;
           brandName: string;
+          purpose: typeof MEDICATION_PURPOSE_VALUES[number];
+          dosingBasis: typeof DOSING_BASIS_VALUES[number] | null;
+          doseValue: string | null;
+          doseUnit: string | null;
+          doseWeightUnit: string | null;
           onLabelDoseText: string | null;
           onLabelDoseAmount: string | null;
           onLabelDoseUnit: string | null;
@@ -602,6 +704,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
             concentrationUnit: r.concentrationUnit,
             manufacturerName: r.manufacturerName,
             brandName: r.brandName,
+            purpose: r.purpose as typeof MEDICATION_PURPOSE_VALUES[number],
+            dosingBasis: (r.dosingBasis as typeof DOSING_BASIS_VALUES[number] | null) ?? null,
+            doseValue: r.doseValue,
+            doseUnit: r.doseUnit,
+            doseWeightUnit: r.doseWeightUnit,
             onLabelDoseText: r.onLabelDoseText,
             onLabelDoseAmount: r.onLabelDoseAmount,
             onLabelDoseUnit: r.onLabelDoseUnit,
@@ -776,6 +883,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
           format: standardMedications.format,
           concentrationValue: standardMedications.concentrationValue,
           concentrationUnit: standardMedications.concentrationUnit,
+          purpose: standardMedications.purpose,
+          dosingBasis: standardMedications.dosingBasis,
+          doseValue: standardMedications.doseValue,
+          doseUnit: standardMedications.doseUnit,
+          doseWeightUnit: standardMedications.doseWeightUnit,
           applicableSpecies: standardMedications.applicableSpecies,
           manufacturerName: standardMedications.manufacturerName,
           brandName: standardMedications.brandName,
@@ -812,6 +924,11 @@ export async function medicationsRoutes(app: FastifyInstance) {
           species: r.species,
           concentrationValue: r.concentrationValue,
           concentrationUnit: r.concentrationUnit,
+          purpose: r.purpose,
+          dosingBasis: r.dosingBasis,
+          doseValue: r.doseValue,
+          doseUnit: r.doseUnit,
+          doseWeightUnit: r.doseWeightUnit,
           applicableSpecies: r.applicableSpecies,
           startDate: r.startDate,
           endDate: r.endDate,

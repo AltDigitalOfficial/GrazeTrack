@@ -43,7 +43,28 @@ const concentrationUnitOptions = [
   "other",
 ] as const;
 
-const dosingPerUnitOptions = ["animal", "lb", "kg"] as const;
+const medicationPurposeOptions = [
+  "VACCINATION",
+  "ANTIBIOTIC",
+  "DEWORMER",
+  "ANTI_INFLAMMATORY",
+  "VITAMIN_SUPPLEMENT",
+  "TOPICAL_WOUND",
+  "OTHER",
+] as const;
+
+const dosingBasisOptions = [
+  { value: "PER_HEAD", label: "Per Head" },
+  { value: "PER_WEIGHT", label: "Per Weight" },
+] as const;
+
+const doseWeightUnitOptions = ["lb", "kg"] as const;
+
+const dosingPerUnitOptions = [
+  { value: "animal", label: "Per Animal" },
+  { value: "lb", label: "Pounds (lb)" },
+  { value: "kg", label: "Kilograms (kg)" },
+] as const;
 
 type ImagePurpose = "label" | "insert" | "misc";
 
@@ -63,6 +84,11 @@ const FormSchema = z.object({
   concentrationUnit: z.string().optional(),
   manufacturerName: z.string().min(1, "Manufacturer is required"),
   brandName: z.string().min(1, "Brand name is required"),
+  purpose: z.string().min(1, "Purpose is required"),
+  dosingBasis: z.string().optional(),
+  doseValue: z.string().optional(),
+  doseUnit: z.string().optional(),
+  doseWeightUnit: z.string().optional(),
   onLabelDoseText: z.string().optional(),
   onLabelDoseAmount: z.string().optional(),
   onLabelDoseUnit: z.string().optional(),
@@ -121,6 +147,13 @@ function looksPositiveNumber(value?: string): boolean {
 
 function buildDoseText(amount: string, unit: string, perAmount: string, perUnit: string): string {
   return `${amount} ${unit} per ${perAmount} ${perUnit}`;
+}
+
+function formatEnumLabel(value: string): string {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function defaultSpeciesStandardDraft(defaultDoseUnit?: string): SpeciesStandardDraft {
@@ -249,6 +282,7 @@ export default function CreateStandardMedicationsPage() {
   const [speciesLoading, setSpeciesLoading] = useState(false);
   const [speciesLoadError, setSpeciesLoadError] = useState<string | null>(null);
   const [speciesStandards, setSpeciesStandards] = useState<Record<string, SpeciesStandardDraft>>({});
+  const [showOnLabelMath, setShowOnLabelMath] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(FormSchema),
@@ -259,11 +293,16 @@ export default function CreateStandardMedicationsPage() {
       concentrationUnit: "mg",
       manufacturerName: "",
       brandName: "",
+      purpose: "OTHER",
+      dosingBasis: "",
+      doseValue: "",
+      doseUnit: "",
+      doseWeightUnit: "",
       onLabelDoseText: "",
       onLabelDoseAmount: "",
-      onLabelDoseUnit: "mL",
+      onLabelDoseUnit: "",
       onLabelPerAmount: "",
-      onLabelPerUnit: "lb",
+      onLabelPerUnit: "",
       applicableSpecies: [],
       startDate: todayIsoDate(),
     },
@@ -276,6 +315,21 @@ export default function CreateStandardMedicationsPage() {
     return Object.values(imagesByPurpose).reduce((sum, arr) => sum + (arr?.length ?? 0), 0);
   }, [imagesByPurpose]);
   const selectedSpecies = form.watch("applicableSpecies") ?? [];
+  const selectedDosingBasis = form.watch("dosingBasis") || "";
+
+  useEffect(() => {
+    const hasOnLabelErrors =
+      !!form.formState.errors.onLabelDoseAmount ||
+      !!form.formState.errors.onLabelDoseUnit ||
+      !!form.formState.errors.onLabelPerAmount ||
+      !!form.formState.errors.onLabelPerUnit;
+    if (hasOnLabelErrors) setShowOnLabelMath(true);
+  }, [
+    form.formState.errors.onLabelDoseAmount,
+    form.formState.errors.onLabelDoseUnit,
+    form.formState.errors.onLabelPerAmount,
+    form.formState.errors.onLabelPerUnit,
+  ]);
 
   useEffect(() => {
     if (!activeRanchId) return;
@@ -465,6 +519,41 @@ export default function CreateStandardMedicationsPage() {
       }
     }
 
+    const purpose = parsed.purpose.trim();
+    const dosingBasisValue = (parsed.dosingBasis ?? "").trim();
+    const dosingBasis = dosingBasisValue === "PER_HEAD" || dosingBasisValue === "PER_WEIGHT" ? dosingBasisValue : null;
+    const doseValue = (parsed.doseValue ?? "").trim();
+    const doseUnit = (parsed.doseUnit ?? "").trim();
+    const doseWeightUnit = (parsed.doseWeightUnit ?? "").trim();
+    const hasAnyDosingInput =
+      !!dosingBasis || doseValue.length > 0 || doseUnit.length > 0 || doseWeightUnit.length > 0;
+
+    if (hasAnyDosingInput && !dosingBasis) {
+      form.setError("dosingBasis", {
+        type: "validate",
+        message: "Select a dosing basis or clear dosing fields.",
+      });
+      return;
+    }
+    if (dosingBasis) {
+      if (!looksPositiveNumber(doseValue)) {
+        form.setError("doseValue", { type: "validate", message: "Dose value must be a positive number." });
+        return;
+      }
+      if (!doseUnit.length) {
+        form.setError("doseUnit", { type: "validate", message: "Dose unit is required." });
+        return;
+      }
+      if (dosingBasis === "PER_WEIGHT" && !doseWeightUnit.length) {
+        form.setError("doseWeightUnit", { type: "validate", message: "Weight unit is required for per-weight dosing." });
+        return;
+      }
+      if (dosingBasis === "PER_HEAD" && doseWeightUnit.length) {
+        form.setError("doseWeightUnit", { type: "validate", message: "Weight unit only applies to per-weight dosing." });
+        return;
+      }
+    }
+
     const concentrationValue =
       parsed.concentrationValue && parsed.concentrationValue.trim().length > 0
         ? parsed.concentrationValue.trim()
@@ -567,6 +656,11 @@ export default function CreateStandardMedicationsPage() {
           concentrationUnit,
           manufacturerName: parsed.manufacturerName.trim(),
           brandName: parsed.brandName.trim(),
+          purpose,
+          dosingBasis,
+          doseValue: dosingBasis ? doseValue : null,
+          doseUnit: dosingBasis ? doseUnit : null,
+          doseWeightUnit: dosingBasis === "PER_WEIGHT" ? doseWeightUnit : null,
           onLabelDoseText,
           onLabelDoseAmount: hasAllOnLabelMath ? parsed.onLabelDoseAmount!.trim() : null,
           onLabelDoseUnit: hasAllOnLabelMath ? parsed.onLabelDoseUnit!.trim() : null,
@@ -588,6 +682,13 @@ export default function CreateStandardMedicationsPage() {
       if (concentrationUnit) fd.append("concentrationUnit", concentrationUnit);
       fd.append("manufacturerName", parsed.manufacturerName.trim());
       fd.append("brandName", parsed.brandName.trim());
+      fd.append("purpose", purpose);
+      if (dosingBasis) fd.append("dosingBasis", dosingBasis);
+      if (dosingBasis && doseValue.length > 0) fd.append("doseValue", doseValue);
+      if (dosingBasis && doseUnit.length > 0) fd.append("doseUnit", doseUnit);
+      if (dosingBasis === "PER_WEIGHT" && doseWeightUnit.length > 0) {
+        fd.append("doseWeightUnit", doseWeightUnit);
+      }
       if (onLabelDoseText) fd.append("onLabelDoseText", onLabelDoseText);
       if (hasAllOnLabelMath) {
         fd.append("onLabelDoseAmount", parsed.onLabelDoseAmount!.trim());
@@ -731,6 +832,125 @@ export default function CreateStandardMedicationsPage() {
               </Select>
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="purposeSelect">Purpose</Label>
+              <Select
+                value={form.watch("purpose") || "OTHER"}
+                onValueChange={(value) => form.setValue("purpose", value, { shouldValidate: true })}
+                disabled={!canInteract}
+              >
+                <SelectTrigger id="purposeSelect" aria-label="Medication purpose" title="Medication purpose">
+                  <SelectValue placeholder="Select purpose" />
+                </SelectTrigger>
+                <SelectContent>
+                  {medicationPurposeOptions.map((opt) => (
+                    <SelectItem key={opt} value={opt}>
+                      {formatEnumLabel(opt)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {form.formState.errors.purpose?.message && (
+                <p className="text-sm text-red-600">{form.formState.errors.purpose.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="dosingBasisSelect">Dosing basis (optional)</Label>
+              <Select
+                value={selectedDosingBasis || "NONE"}
+                onValueChange={(value) => {
+                  const next = value === "NONE" ? "" : value;
+                  form.setValue("dosingBasis", next, { shouldValidate: true });
+                  if (next === "PER_WEIGHT") {
+                    const current = form.getValues("doseWeightUnit");
+                    if (!current || !current.trim()) {
+                      form.setValue("doseWeightUnit", "lb", { shouldValidate: true });
+                    }
+                  } else {
+                    form.setValue("doseWeightUnit", "", { shouldValidate: true });
+                  }
+                }}
+                disabled={!canInteract}
+              >
+                <SelectTrigger id="dosingBasisSelect" aria-label="Dosing basis" title="Dosing basis">
+                  <SelectValue placeholder="Select dosing basis" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NONE">Not set</SelectItem>
+                  {dosingBasisOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {form.formState.errors.dosingBasis?.message && (
+                <p className="text-sm text-red-600">{form.formState.errors.dosingBasis.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="doseValue">Dose value (optional)</Label>
+              <Input
+                id="doseValue"
+                {...form.register("doseValue")}
+                disabled={!canInteract}
+                placeholder="e.g. 2.5"
+              />
+              {form.formState.errors.doseValue?.message && (
+                <p className="text-sm text-red-600">{form.formState.errors.doseValue.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="doseUnit">Dose unit (optional)</Label>
+              <Input
+                id="doseUnit"
+                {...form.register("doseUnit")}
+                disabled={!canInteract}
+                placeholder="e.g. mL"
+              />
+              {form.formState.errors.doseUnit?.message && (
+                <p className="text-sm text-red-600">{form.formState.errors.doseUnit.message}</p>
+              )}
+            </div>
+
+            {selectedDosingBasis === "PER_WEIGHT" && (
+              <div className="space-y-2">
+                <Label htmlFor="doseWeightUnitSelect">Dose weight unit</Label>
+                <Select
+                  value={form.watch("doseWeightUnit") || "lb"}
+                  onValueChange={(value) => form.setValue("doseWeightUnit", value, { shouldValidate: true })}
+                  disabled={!canInteract}
+                >
+                  <SelectTrigger
+                    id="doseWeightUnitSelect"
+                    aria-label="Dose weight unit"
+                    title="Dose weight unit"
+                  >
+                    <SelectValue placeholder="Select unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {doseWeightUnitOptions.map((opt) => (
+                      <SelectItem key={opt} value={opt}>
+                        {opt}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.formState.errors.doseWeightUnit?.message && (
+                  <p className="text-sm text-red-600">{form.formState.errors.doseWeightUnit.message}</p>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2 md:col-span-2">
+              <p className="text-xs text-muted-foreground">
+                Dosing model is used for working-day medication quantity estimation. Leave it blank if unknown.
+              </p>
+            </div>
+
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="onLabelDoseText">On-label dosing (optional)</Label>
               <Textarea
@@ -742,36 +962,77 @@ export default function CreateStandardMedicationsPage() {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="onLabelDoseAmount">On-label dose amount (optional)</Label>
-              <Input id="onLabelDoseAmount" {...form.register("onLabelDoseAmount")} disabled={!canInteract} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="onLabelDoseUnit">On-label dose unit (optional)</Label>
-              <Input id="onLabelDoseUnit" {...form.register("onLabelDoseUnit")} disabled={!canInteract} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="onLabelPerAmount">On-label per amount (optional)</Label>
-              <Input id="onLabelPerAmount" {...form.register("onLabelPerAmount")} disabled={!canInteract} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="onLabelPerUnit">On-label per unit (optional)</Label>
-              <Select
-                value={form.watch("onLabelPerUnit") || "lb"}
-                onValueChange={(value) => form.setValue("onLabelPerUnit", value, { shouldValidate: true })}
-                disabled={!canInteract}
-              >
-                <SelectTrigger id="onLabelPerUnit" aria-label="On-label per unit" title="On-label per unit">
-                  <SelectValue placeholder="Select per unit" />
-                </SelectTrigger>
-                <SelectContent>
-                  {dosingPerUnitOptions.map((opt) => (
-                    <SelectItem key={opt} value={opt}>
-                      {opt}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-3 md:col-span-2 rounded-md border border-dashed p-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Advanced: Structured On-label Math</div>
+                  <div className="text-xs text-muted-foreground">
+                    Optional. Working Day estimates use the Dosing Model above.
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowOnLabelMath((prev) => !prev)}
+                  disabled={!canInteract}
+                >
+                  {showOnLabelMath ? "Hide Fields" : "Add Structured Math"}
+                </Button>
+              </div>
+
+              {showOnLabelMath && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="onLabelDoseAmount">On-label dose amount</Label>
+                    <Input id="onLabelDoseAmount" {...form.register("onLabelDoseAmount")} disabled={!canInteract} />
+                    {form.formState.errors.onLabelDoseAmount?.message && (
+                      <p className="text-sm text-red-600">{form.formState.errors.onLabelDoseAmount.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="onLabelDoseUnit">On-label dose unit</Label>
+                    <Input id="onLabelDoseUnit" {...form.register("onLabelDoseUnit")} disabled={!canInteract} />
+                    {form.formState.errors.onLabelDoseUnit?.message && (
+                      <p className="text-sm text-red-600">{form.formState.errors.onLabelDoseUnit.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="onLabelPerAmount">On-label per amount</Label>
+                    <Input id="onLabelPerAmount" {...form.register("onLabelPerAmount")} disabled={!canInteract} />
+                    {form.formState.errors.onLabelPerAmount?.message && (
+                      <p className="text-sm text-red-600">{form.formState.errors.onLabelPerAmount.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="onLabelPerUnit">On-label per unit</Label>
+                    <Select
+                      value={form.watch("onLabelPerUnit") || "NONE"}
+                      onValueChange={(value) =>
+                        form.setValue("onLabelPerUnit", value === "NONE" ? "" : value, {
+                          shouldValidate: true,
+                        })
+                      }
+                      disabled={!canInteract}
+                    >
+                      <SelectTrigger id="onLabelPerUnit" aria-label="On-label per unit" title="On-label per unit">
+                        <SelectValue placeholder="Select per unit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="NONE">Not set</SelectItem>
+                        {dosingPerUnitOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {form.formState.errors.onLabelPerUnit?.message && (
+                      <p className="text-sm text-red-600">{form.formState.errors.onLabelPerUnit.message}</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2 md:col-span-2">
@@ -938,8 +1199,8 @@ export default function CreateStandardMedicationsPage() {
                             </SelectTrigger>
                             <SelectContent>
                               {dosingPerUnitOptions.map((opt) => (
-                                <SelectItem key={opt} value={opt}>
-                                  {opt}
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
                                 </SelectItem>
                               ))}
                             </SelectContent>

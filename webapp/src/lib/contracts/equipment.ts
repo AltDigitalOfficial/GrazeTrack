@@ -45,6 +45,8 @@ export const EquipmentPartCategorySchema = z.enum([
   "LIVESTOCK_HANDLING",
   "IMPLEMENT_PART",
   "VEHICLE_PART",
+  "IDENTIFICATION",
+  "MED_SUPPLIES",
   "OTHER",
 ]);
 export const EquipmentPartUnitTypeSchema = z.enum(["COUNT", "LENGTH", "WEIGHT"]);
