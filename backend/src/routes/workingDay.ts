@@ -15,6 +15,7 @@ import {
   fuelInventoryBalances,
   fuelProducts,
   herds,
+  medicationPurchases,
   ranchMedicationStandards,
   standardMedications,
   workingDayPlanItemEquipmentNeeds,
@@ -43,6 +44,19 @@ const PLAN_ITEM_STATUSES = new Set<WorkingDayItemStatus>(
   WorkingDayPlanItemStatusSchema.options as readonly WorkingDayItemStatus[]
 );
 const SUPPLY_TYPES = new Set<WorkingDaySupplyType>(WorkingDaySupplyTypeSchema.options as readonly WorkingDaySupplyType[]);
+const TAG_TASK_TYPES = new Set(["TAG_ID"]);
+const MEDICATION_TASK_TYPES = new Set(["MEDICATE_ANIMAL", "VET_TREATMENT", "GROUP_MEDICATION", "VACCINATE_GROUP"]);
+const VACCINATION_TASK_TYPES = new Set(["VACCINATE_GROUP"]);
+const MEDICATION_PURPOSE_VALUES = [
+  "VACCINATION",
+  "ANTIBIOTIC",
+  "DEWORMER",
+  "ANTI_INFLAMMATORY",
+  "VITAMIN_SUPPLEMENT",
+  "TOPICAL_WOUND",
+  "OTHER",
+] as const;
+const MEDICATION_PURPOSE_SET = new Set<string>(MEDICATION_PURPOSE_VALUES);
 
 function appError(statusCode: number, message: string): AppError {
   const err = new Error(message) as AppError;
@@ -160,6 +174,55 @@ function labelFromTaskType(taskType: string): string {
     .split("_")
     .map((part) => (part.length ? part.charAt(0) + part.slice(1).toLowerCase() : ""))
     .join(" ");
+}
+
+function canonicalMedicationUnitFromFormat(format: string | null | undefined): string {
+  switch (String(format ?? "").trim().toLowerCase()) {
+    case "pill":
+      return "pills";
+    case "powder":
+      return "g";
+    case "liquid":
+    case "injectable":
+    case "paste":
+    case "topical":
+      return "mL";
+    default:
+      return "units";
+  }
+}
+
+function buildMedicationDisplayName(row: {
+  chemicalName: string;
+  brandName: string;
+  manufacturerName?: string | null;
+  format?: string | null;
+  concentrationValue?: string | null;
+  concentrationUnit?: string | null;
+}) {
+  const chemical = row.chemicalName?.trim() || "Unknown";
+  const brand = row.brandName?.trim() || "Unbranded";
+  const manufacturer = row.manufacturerName?.trim() || "Unknown maker";
+  const format = row.format?.trim() || "format";
+  const concentration =
+    row.concentrationValue && row.concentrationUnit
+      ? ` ${row.concentrationValue}${row.concentrationUnit}`
+      : "";
+  return `${brand} - ${chemical}${concentration} (${manufacturer}, ${format})`;
+}
+
+function isTagTaskType(taskType: string | null | undefined): boolean {
+  return TAG_TASK_TYPES.has(String(taskType ?? "").trim().toUpperCase());
+}
+
+function isMedicationTaskType(taskType: string | null | undefined): boolean {
+  return MEDICATION_TASK_TYPES.has(String(taskType ?? "").trim().toUpperCase());
+}
+
+function defaultMedicationPurposeForTask(taskType: string | null | undefined): (typeof MEDICATION_PURPOSE_VALUES)[number] | null {
+  const normalized = String(taskType ?? "").trim().toUpperCase();
+  if (VACCINATION_TASK_TYPES.has(normalized)) return "VACCINATION";
+  return null;
 }
 
 function isLikelyTagSupplyNeed(need: {
@@ -333,16 +396,51 @@ async function computeSupplyReadiness(ranchId: string, supplyNeeds: Array<typeof
         ? db
             .select({
               id: ranchMedicationStandards.id,
+              standardMedicationId: standardMedications.id,
               chemicalName: standardMedications.chemicalName,
               brandName: standardMedications.brandName,
+              manufacturerName: standardMedications.manufacturerName,
+              format: standardMedications.format,
+              concentrationValue: standardMedications.concentrationValue,
+              concentrationUnit: standardMedications.concentrationUnit,
+              onHandQuantity: sql<string>`COALESCE(SUM(${medicationPurchases.quantity}), 0)`,
             })
             .from(ranchMedicationStandards)
             .innerJoin(
               standardMedications,
               and(eq(standardMedications.id, ranchMedicationStandards.standardMedicationId), eq(standardMedications.ranchId, ranchId))
             )
+            .leftJoin(
+              medicationPurchases,
+              and(
+                eq(medicationPurchases.ranchId, ranchId),
+                eq(medicationPurchases.standardMedicationId, standardMedications.id)
+              )
+            )
             .where(and(eq(ranchMedicationStandards.ranchId, ranchId), inArray(ranchMedicationStandards.id, medicationStandardIds)))
-        : Promise.resolve([] as Array<{ id: string; chemicalName: string; brandName: string }>),
+            .groupBy(
+              ranchMedicationStandards.id,
+              standardMedications.id,
+              standardMedications.chemicalName,
+              standardMedications.brandName,
+              standardMedications.manufacturerName,
+              standardMedications.format,
+              standardMedications.concentrationValue,
+              standardMedications.concentrationUnit
+            )
+        : Promise.resolve(
+            [] as Array<{
+              id: string;
+              standardMedicationId: string;
+              chemicalName: string;
+              brandName: string;
+              manufacturerName: string;
+              format: string;
+              concentrationValue: string | null;
+              concentrationUnit: string | null;
+              onHandQuantity: string;
+            }>
+          ),
       feedComponentIds.length
         ? db
             .select({ id: feedInventoryBalances.feedComponentId, quantityOnHand: feedInventoryBalances.quantityOnHand })
@@ -476,9 +574,10 @@ async function computeSupplyReadiness(ranchId: string, supplyNeeds: Array<typeof
       if (!info) message = "Linked part not found in active ranch.";
     } else if (linkedType === "MEDICATION_STANDARD" && linkedId) {
       const info = medById.get(linkedId);
-      name = fallbackName ?? (info ? `${info.brandName} (${info.chemicalName})` : "Medication standard");
-      onHandQuantity = null;
-      message = "Medication inventory balance is not tracked in v1.";
+      name = fallbackName ?? (info ? buildMedicationDisplayName(info) : "Medication standard");
+      onHandQuantity = info ? Number(info.onHandQuantity ?? 0) : null;
+      onHandUnit = requiredUnit ?? (info ? canonicalMedicationUnitFromFormat(info.format) : null);
+      if (!info) message = "Linked medication standard not found in active ranch.";
     } else if (isTagNeed) {
       name = fallbackName ?? "Tags";
       onHandQuantity = tagOnHandTotal;
@@ -831,6 +930,18 @@ const EquipmentNeedCreateBodySchema = z.object({
 
 const EquipmentNeedUpdateBodySchema = EquipmentNeedCreateBodySchema.partial();
 
+const SupplyOptionsPartsQuerySchema = RanchScopedSchema.extend({
+  category: z.string().optional().nullable(),
+  search: z.string().optional().nullable(),
+  includeInactive: z.union([z.boolean(), z.string()]).optional().nullable(),
+});
+
+const SupplyOptionsMedicationsQuerySchema = RanchScopedSchema.extend({
+  purpose: z.string().optional().nullable(),
+  species: z.string().optional().nullable(),
+  search: z.string().optional().nullable(),
+});
+
 export async function workingDayRoutes(app: FastifyInstance) {
   app.get("/working-day/task-catalog", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -840,6 +951,176 @@ export async function workingDayRoutes(app: FastifyInstance) {
       return reply.send({ tasks: await listTaskCatalog() });
     } catch (err) {
       return withErrorHandling(req, reply, err, "Failed to list working day task catalog", "Failed to list working day task catalog");
+    }
+  });
+
+  app.get("/working-day/supply-options/parts", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const query = SupplyOptionsPartsQuerySchema.parse(req.query ?? {});
+      const ranchId = await resolveRanchId(req.auth!.userId, query.ranchId ?? null);
+      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+
+      const whereParts = [eq(equipmentParts.ranchId, ranchId)] as any[];
+      if (query.category?.trim()) {
+        whereParts.push(eq(equipmentParts.category, query.category.trim().toUpperCase()));
+      }
+      if (!toBooleanLike(query.includeInactive, false)) whereParts.push(eq(equipmentParts.isActive, true));
+      if (query.search?.trim()) {
+        const search = `%${query.search.trim()}%`;
+        whereParts.push(
+          sql`(
+            ${equipmentParts.name} ILIKE ${search}
+            OR COALESCE(${equipmentParts.manufacturer}, '') ILIKE ${search}
+            OR COALESCE(${equipmentParts.partNumber}, '') ILIKE ${search}
+            OR COALESCE(${equipmentParts.description}, '') ILIKE ${search}
+          )`
+        );
+      }
+
+      const rows = await db
+        .select({
+          id: equipmentParts.id,
+          name: equipmentParts.name,
+          category: equipmentParts.category,
+          description: equipmentParts.description,
+          manufacturer: equipmentParts.manufacturer,
+          partNumber: equipmentParts.partNumber,
+          defaultUnit: equipmentParts.defaultUnit,
+          onHandQuantity: equipmentParts.onHandQuantity,
+          isActive: equipmentParts.isActive,
+        })
+        .from(equipmentParts)
+        .where(whereParts.length > 1 ? and(...whereParts) : whereParts[0])
+        .orderBy(asc(equipmentParts.category), asc(equipmentParts.name), asc(equipmentParts.createdAt));
+
+      return reply.send({ parts: rows });
+    } catch (err) {
+      return withErrorHandling(
+        req,
+        reply,
+        err,
+        "Failed to list working day part supply options",
+        "Failed to list working day part supply options"
+      );
+    }
+  });
+
+  app.get("/working-day/supply-options/medications", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const query = SupplyOptionsMedicationsQuerySchema.parse(req.query ?? {});
+      const ranchId = await resolveRanchId(req.auth!.userId, query.ranchId ?? null);
+      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+
+      const purpose = query.purpose?.trim().toUpperCase() ?? null;
+      if (purpose && !MEDICATION_PURPOSE_SET.has(purpose)) {
+        return reply.status(400).send({ error: "Invalid medication purpose filter." });
+      }
+      const speciesFilter = query.species?.trim().toLowerCase() ?? null;
+      const searchFilter = query.search?.trim() ?? null;
+
+      const whereClause = [eq(ranchMedicationStandards.ranchId, ranchId), isNull(ranchMedicationStandards.endDate)] as any[];
+      if (purpose) whereClause.push(eq(standardMedications.purpose, purpose));
+      if (searchFilter) {
+        const search = `%${searchFilter}%`;
+        whereClause.push(
+          sql`(
+            ${standardMedications.chemicalName} ILIKE ${search}
+            OR ${standardMedications.brandName} ILIKE ${search}
+            OR COALESCE(${standardMedications.manufacturerName}, '') ILIKE ${search}
+          )`
+        );
+      }
+
+      const rows = await db
+        .select({
+          standardId: ranchMedicationStandards.id,
+          standardMedicationId: standardMedications.id,
+          chemicalName: standardMedications.chemicalName,
+          brandName: standardMedications.brandName,
+          manufacturerName: standardMedications.manufacturerName,
+          format: standardMedications.format,
+          concentrationValue: standardMedications.concentrationValue,
+          concentrationUnit: standardMedications.concentrationUnit,
+          purpose: standardMedications.purpose,
+          dosingBasis: standardMedications.dosingBasis,
+          doseValue: standardMedications.doseValue,
+          doseUnit: standardMedications.doseUnit,
+          doseWeightUnit: standardMedications.doseWeightUnit,
+          applicableSpecies: standardMedications.applicableSpecies,
+          species: ranchMedicationStandards.species,
+          onHandQuantity: sql<string>`COALESCE(SUM(${medicationPurchases.quantity}), 0)`,
+        })
+        .from(ranchMedicationStandards)
+        .innerJoin(
+          standardMedications,
+          and(
+            eq(standardMedications.id, ranchMedicationStandards.standardMedicationId),
+            eq(standardMedications.ranchId, ranchId)
+          )
+        )
+        .leftJoin(
+          medicationPurchases,
+          and(
+            eq(medicationPurchases.ranchId, ranchId),
+            eq(medicationPurchases.standardMedicationId, standardMedications.id)
+          )
+        )
+        .where(and(...whereClause))
+        .groupBy(
+          ranchMedicationStandards.id,
+          standardMedications.id,
+          standardMedications.chemicalName,
+          standardMedications.brandName,
+          standardMedications.manufacturerName,
+          standardMedications.format,
+          standardMedications.concentrationValue,
+          standardMedications.concentrationUnit,
+          standardMedications.purpose,
+          standardMedications.dosingBasis,
+          standardMedications.doseValue,
+          standardMedications.doseUnit,
+          standardMedications.doseWeightUnit,
+          standardMedications.applicableSpecies,
+          ranchMedicationStandards.species
+        )
+        .orderBy(asc(standardMedications.chemicalName), asc(standardMedications.brandName));
+
+      const filtered = speciesFilter
+        ? rows.filter((row) => {
+            const standardSpecies = String(row.species ?? "").trim().toLowerCase();
+            if (standardSpecies && standardSpecies !== speciesFilter) return false;
+            const allowedSpecies = Array.isArray(row.applicableSpecies)
+              ? row.applicableSpecies.map((s) => String(s ?? "").trim().toLowerCase()).filter(Boolean)
+              : [];
+            if (allowedSpecies.length > 0 && !allowedSpecies.includes(speciesFilter)) return false;
+            return true;
+          })
+        : rows;
+
+      return reply.send({
+        medications: filtered.map((row) => ({
+          standardId: row.standardId,
+          standardMedicationId: row.standardMedicationId,
+          displayName: buildMedicationDisplayName(row),
+          purpose: row.purpose,
+          dosingBasis: row.dosingBasis,
+          doseValue: row.doseValue,
+          doseUnit: row.doseUnit,
+          doseWeightUnit: row.doseWeightUnit,
+          species: row.species,
+          applicableSpecies: row.applicableSpecies,
+          onHandQuantity: row.onHandQuantity,
+          onHandUnit: canonicalMedicationUnitFromFormat(row.format),
+        })),
+      });
+    } catch (err) {
+      return withErrorHandling(
+        req,
+        reply,
+        err,
+        "Failed to list working day medication supply options",
+        "Failed to list working day medication supply options"
+      );
     }
   });
 
@@ -1048,10 +1329,15 @@ export async function workingDayRoutes(app: FastifyInstance) {
         });
 
         const applySuggestedNeeds = toBooleanLike(body.applySuggestedNeeds, true);
-        if (!applySuggestedNeeds) return;
-
-        const suggestedSupplyNeeds = Array.isArray(task.suggestedSupplyNeedsJson) ? task.suggestedSupplyNeedsJson : [];
-        const suggestedEquipmentNeeds = Array.isArray(task.suggestedEquipmentNeedsJson) ? task.suggestedEquipmentNeedsJson : [];
+        const suggestedSupplyNeeds =
+          applySuggestedNeeds && Array.isArray(task.suggestedSupplyNeedsJson) ? task.suggestedSupplyNeedsJson : [];
+        const suggestedEquipmentNeeds =
+          applySuggestedNeeds && Array.isArray(task.suggestedEquipmentNeedsJson) ? task.suggestedEquipmentNeedsJson : [];
+        const insertedSupplyNeeds: Array<{
+          supplyType: string;
+          linkedEntityType: string | null;
+          nameOverride: string | null;
+        }> = [];
 
         for (const rawNeed of suggestedSupplyNeeds) {
           const entry = rawNeed as Record<string, unknown>;
@@ -1094,6 +1380,57 @@ export async function workingDayRoutes(app: FastifyInstance) {
             createdAt: now,
             updatedAt: now,
           });
+          insertedSupplyNeeds.push({
+            supplyType,
+            linkedEntityType,
+            nameOverride,
+          });
+        }
+
+        // Task-driven minimum supply needs should exist even when suggested-needs are not applied.
+        if (isTagTaskType(taskType)) {
+          const hasTagNeed = insertedSupplyNeeds.some((need) =>
+            isLikelyTagSupplyNeed({
+              supplyType: need.supplyType,
+              linkedEntityType: need.linkedEntityType,
+              nameOverride: need.nameOverride,
+            })
+          );
+          if (!hasTagNeed) {
+            await tx.insert(workingDayPlanItemSupplyNeeds).values({
+              id: crypto.randomUUID(),
+              planItemId: itemId,
+              supplyType: "PART_SUPPLY",
+              linkedEntityType: null,
+              linkedEntityId: null,
+              nameOverride: "Tags and ID supplies",
+              requiredQuantity: animalId ? "1" : null,
+              unit: animalId ? "each" : null,
+              notes: null,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        }
+
+        if (isMedicationTaskType(taskType)) {
+          const hasMedicationNeed = insertedSupplyNeeds.some((need) => need.supplyType === "MEDICATION");
+          if (!hasMedicationNeed) {
+            const purpose = defaultMedicationPurposeForTask(taskType);
+            await tx.insert(workingDayPlanItemSupplyNeeds).values({
+              id: crypto.randomUUID(),
+              planItemId: itemId,
+              supplyType: "MEDICATION",
+              linkedEntityType: null,
+              linkedEntityId: null,
+              nameOverride: purpose === "VACCINATION" ? "Vaccine supplies" : "Medication supplies",
+              requiredQuantity: null,
+              unit: null,
+              notes: null,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
         }
 
         for (const rawNeed of suggestedEquipmentNeeds) {
@@ -1171,6 +1508,52 @@ export async function workingDayRoutes(app: FastifyInstance) {
       if (body.sortOrder !== undefined) updateSet.sortOrder = toNullableInteger(body.sortOrder, { allowZero: true, allowNegative: false, fieldLabel: "sortOrder" });
 
       await db.update(workingDayPlanItems).set(updateSet).where(eq(workingDayPlanItems.id, itemId));
+
+      const nextTaskType = String(updateSet.taskType ?? existing.taskType).trim().toUpperCase();
+      const nextAnimalId = updateSet.animalId !== undefined ? updateSet.animalId : existing.animalId;
+      if (isTagTaskType(nextTaskType) || isMedicationTaskType(nextTaskType)) {
+        const currentNeeds = await db
+          .select()
+          .from(workingDayPlanItemSupplyNeeds)
+          .where(eq(workingDayPlanItemSupplyNeeds.planItemId, itemId));
+
+        if (isTagTaskType(nextTaskType) && !currentNeeds.some((need) => isLikelyTagSupplyNeed(need))) {
+          await db.insert(workingDayPlanItemSupplyNeeds).values({
+            id: crypto.randomUUID(),
+            planItemId: itemId,
+            supplyType: "PART_SUPPLY",
+            linkedEntityType: null,
+            linkedEntityId: null,
+            nameOverride: "Tags and ID supplies",
+            requiredQuantity: nextAnimalId ? "1" : null,
+            unit: nextAnimalId ? "each" : null,
+            notes: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+
+        if (
+          isMedicationTaskType(nextTaskType) &&
+          !currentNeeds.some((need) => String(need.supplyType ?? "").trim().toUpperCase() === "MEDICATION")
+        ) {
+          const purpose = defaultMedicationPurposeForTask(nextTaskType);
+          await db.insert(workingDayPlanItemSupplyNeeds).values({
+            id: crypto.randomUUID(),
+            planItemId: itemId,
+            supplyType: "MEDICATION",
+            linkedEntityType: null,
+            linkedEntityId: null,
+            nameOverride: purpose === "VACCINATION" ? "Vaccine supplies" : "Medication supplies",
+            requiredQuantity: null,
+            unit: null,
+            notes: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+      }
+
       const rows = await db.select().from(workingDayPlanItems).where(eq(workingDayPlanItems.id, itemId)).limit(1);
       return reply.send({ item: rows[0] ?? null });
     } catch (err) {

@@ -25,6 +25,41 @@ export const WorkingDayTaskCatalogItemSchema = z.object({
   isActive: z.boolean(),
 });
 
+export const WorkingDaySupplyOptionPartSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  category: z.string(),
+  description: z.string().nullable().optional(),
+  manufacturer: z.string().nullable().optional(),
+  partNumber: z.string().nullable().optional(),
+  defaultUnit: z.string(),
+  onHandQuantity: NumericLikeSchema,
+  isActive: z.boolean(),
+});
+
+export const WorkingDaySupplyOptionsPartsResponseSchema = z.object({
+  parts: z.array(WorkingDaySupplyOptionPartSchema),
+});
+
+export const WorkingDaySupplyOptionMedicationSchema = z.object({
+  standardId: z.string().uuid(),
+  standardMedicationId: z.string().uuid(),
+  displayName: z.string(),
+  purpose: z.string().nullable().optional(),
+  dosingBasis: z.string().nullable().optional(),
+  doseValue: NumericLikeSchema.nullable().optional(),
+  doseUnit: z.string().nullable().optional(),
+  doseWeightUnit: z.string().nullable().optional(),
+  species: z.string().nullable().optional(),
+  applicableSpecies: z.array(z.string()).nullable().optional(),
+  onHandQuantity: NumericLikeSchema.nullable().optional(),
+  onHandUnit: z.string().nullable().optional(),
+});
+
+export const WorkingDaySupplyOptionsMedicationsResponseSchema = z.object({
+  medications: z.array(WorkingDaySupplyOptionMedicationSchema),
+});
+
 export const WorkingDayPlanSchema = z.object({
   id: z.string().uuid(),
   ranchId: z.string().uuid(),
@@ -206,6 +241,8 @@ export type WorkingDayPlanCategory = z.infer<typeof WorkingDayPlanCategorySchema
 export type WorkingDayPlanItemStatus = z.infer<typeof WorkingDayPlanItemStatusSchema>;
 export type WorkingDaySupplyType = z.infer<typeof WorkingDaySupplyTypeSchema>;
 export type WorkingDayTaskCatalogItem = z.infer<typeof WorkingDayTaskCatalogItemSchema>;
+export type WorkingDaySupplyOptionPart = z.infer<typeof WorkingDaySupplyOptionPartSchema>;
+export type WorkingDaySupplyOptionMedication = z.infer<typeof WorkingDaySupplyOptionMedicationSchema>;
 export type WorkingDayPlan = z.infer<typeof WorkingDayPlanSchema>;
 export type WorkingDayPlanItem = z.infer<typeof WorkingDayPlanItemSchema>;
 export type WorkingDayPlanItemSupplyNeed = z.infer<typeof WorkingDayPlanItemSupplyNeedSchema>;

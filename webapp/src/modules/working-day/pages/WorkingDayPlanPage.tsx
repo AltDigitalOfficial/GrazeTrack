@@ -10,12 +10,16 @@ import {
   WorkingDayPlanInventoryResponseSchema,
   WorkingDayPlanItemResponseSchema,
   WorkingDayPlanResponseSchema,
+  WorkingDaySupplyOptionsMedicationsResponseSchema,
+  WorkingDaySupplyOptionsPartsResponseSchema,
   WorkingDaySupplyNeedResponseSchema,
   type WorkingDayPlanCategory,
   type WorkingDayPlanInventoryResponse,
   type WorkingDayPlanItem,
   type WorkingDayPlanItemStatus,
   type WorkingDayPlanResponse,
+  type WorkingDaySupplyOptionMedication,
+  type WorkingDaySupplyOptionPart,
   type WorkingDaySupplyType,
   type WorkingDayTaskCatalogItem,
 } from "@/lib/contracts/workingDay";
@@ -34,6 +38,7 @@ const HerdListSchema = z.array(
   z.object({
     id: z.string().uuid(),
     name: z.string(),
+    species: z.string().nullable().optional(),
   })
 );
 
@@ -62,6 +67,18 @@ type ItemFormState = {
   applySuggestedNeeds: boolean;
 };
 
+type HerdRef = {
+  id: string;
+  name: string;
+  species?: string | null;
+};
+
+type AnimalRef = {
+  id: string;
+  label: string;
+  species?: string | null;
+};
+
 type SupplyNeedFormState = {
   planItemId: string;
   supplyType: WorkingDaySupplyType;
@@ -81,6 +98,21 @@ type EquipmentNeedFormState = {
   notes: string;
 };
 
+type GuidedSupplyBindingMode = "TAG" | "MEDICATION";
+
+type GuidedSupplyBindingRequest = {
+  mode: GuidedSupplyBindingMode;
+  itemId: string;
+  itemTitle: string;
+  taskType: string;
+  existingNeedId: string | null;
+  requiredQuantity: string | null;
+  unit: string | null;
+  notes: string | null;
+  speciesFilter: string | null;
+  medicationPurpose: string | null;
+};
+
 const CATEGORIES: WorkingDayPlanCategory[] = ["HERD_WORK", "ANIMAL_WORK", "RANCH_WORK"];
 const STATUSES: WorkingDayPlanItemStatus[] = ["PLANNED", "IN_PROGRESS", "DONE", "SKIPPED"];
 const SUPPLY_TYPES: WorkingDaySupplyType[] = ["MEDICATION", "FEED", "ADDITIVE", "FUEL_FLUID", "PART_SUPPLY", "OTHER"];
@@ -91,6 +123,7 @@ const PLAN_INVENTORY_WINDOWS = [
   { value: 30, label: "Monthly" },
 ] as const;
 type PlanInventoryWindowDays = (typeof PLAN_INVENTORY_WINDOWS)[number]["value"];
+const MEDICATION_TASK_TYPES = new Set(["MEDICATE_ANIMAL", "VET_TREATMENT", "GROUP_MEDICATION", "VACCINATE_GROUP"]);
 
 function enumLabel(value: string): string {
   return value
@@ -184,6 +217,26 @@ function needLabel(need: WorkingDayPlanItem["supplyNeeds"][number]): string {
   return "Supply need";
 }
 
+function isTagTaskType(taskType: string | null | undefined): boolean {
+  return String(taskType ?? "").trim().toUpperCase() === "TAG_ID";
+}
+
+function isMedicationTaskType(taskType: string | null | undefined): boolean {
+  return MEDICATION_TASK_TYPES.has(String(taskType ?? "").trim().toUpperCase());
+}
+
+function defaultMedicationPurposeForTask(taskType: string | null | undefined): string | null {
+  const normalized = String(taskType ?? "").trim().toUpperCase();
+  if (normalized === "VACCINATE_GROUP") return "VACCINATION";
+  return null;
+}
+
+function isLikelyTagSupplyNeed(need: WorkingDayPlanItem["supplyNeeds"][number]): boolean {
+  if (String(need.supplyType ?? "").trim().toUpperCase() !== "PART_SUPPLY") return false;
+  const text = `${need.nameOverride ?? ""} ${need.linkedEntityType ?? ""}`.toLowerCase();
+  return /(^|[^a-z])tags?([^a-z]|$)/.test(text) || text.includes("identification");
+}
+
 export default function WorkingDayPlanPage() {
   const { toast } = useToast();
   const { activeRanchId, loading: ranchLoading } = useRanch();
@@ -191,8 +244,8 @@ export default function WorkingDayPlanPage() {
   const [planDate, setPlanDate] = useState(tomorrowIsoDate());
   const [planData, setPlanData] = useState<WorkingDayPlanResponse | null>(null);
   const [planInventory, setPlanInventory] = useState<WorkingDayPlanInventoryResponse | null>(null);
-  const [herds, setHerds] = useState<Array<{ id: string; name: string }>>([]);
-  const [animals, setAnimals] = useState<Array<{ id: string; label: string }>>([]);
+  const [herds, setHerds] = useState<HerdRef[]>([]);
+  const [animals, setAnimals] = useState<AnimalRef[]>([]);
   const [assets, setAssets] = useState<EquipmentAssetRow[]>([]);
 
   const [loadingPlan, setLoadingPlan] = useState(false);
@@ -222,6 +275,16 @@ export default function WorkingDayPlanPage() {
   const [equipmentForm, setEquipmentForm] = useState<EquipmentNeedFormState>(emptyEquipmentNeed());
   const [equipmentError, setEquipmentError] = useState<string | null>(null);
 
+  const [guidedQueue, setGuidedQueue] = useState<GuidedSupplyBindingRequest[]>([]);
+  const [activeGuidedRequest, setActiveGuidedRequest] = useState<GuidedSupplyBindingRequest | null>(null);
+  const [guidedDialogOpen, setGuidedDialogOpen] = useState(false);
+  const [guidedOptionsLoading, setGuidedOptionsLoading] = useState(false);
+  const [guidedOptionsError, setGuidedOptionsError] = useState<string | null>(null);
+  const [tagPartOptions, setTagPartOptions] = useState<WorkingDaySupplyOptionPart[]>([]);
+  const [medicationOptions, setMedicationOptions] = useState<WorkingDaySupplyOptionMedication[]>([]);
+  const [selectedTagPartId, setSelectedTagPartId] = useState("");
+  const [selectedMedicationStandardId, setSelectedMedicationStandardId] = useState("");
+
   const taskCatalog = useMemo(() => planData?.taskCatalog ?? [], [planData?.taskCatalog]);
   const canInteract = !ranchLoading && !!activeRanchId && !saving && !loadingPlan;
   const proposedDateLabel = useMemo(() => formatPlanDateLabel(planDate), [planDate]);
@@ -244,6 +307,24 @@ export default function WorkingDayPlanPage() {
     () => new Map((planData?.readiness.supplies.needs ?? []).map((need) => [need.id, need])),
     [planData?.readiness.supplies.needs]
   );
+  const activeGuidedTagPart = useMemo(
+    () => tagPartOptions.find((part) => part.id === selectedTagPartId) ?? null,
+    [tagPartOptions, selectedTagPartId]
+  );
+  const activeGuidedMedication = useMemo(
+    () => medicationOptions.find((med) => med.standardId === selectedMedicationStandardId) ?? null,
+    [medicationOptions, selectedMedicationStandardId]
+  );
+  const activeGuidedTagRequiredQuantity = useMemo(() => {
+    if (!activeGuidedRequest || activeGuidedRequest.mode !== "TAG") return 1;
+    const n = Number(activeGuidedRequest.requiredQuantity ?? "1");
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  }, [activeGuidedRequest]);
+  const activeGuidedTagOnHandQuantity = useMemo(() => {
+    if (!activeGuidedTagPart) return null;
+    const n = Number(activeGuidedTagPart.onHandQuantity ?? 0);
+    return Number.isFinite(n) ? n : null;
+  }, [activeGuidedTagPart]);
 
   async function loadReferences() {
     if (!activeRanchId) {
@@ -263,12 +344,18 @@ export default function WorkingDayPlanPage() {
       const parsedAnimals = AnimalListSchema.parse(animalsRaw);
       const parsedAssets = EquipmentAssetsResponseSchema.parse(assetsRaw);
 
-      setHerds(parsedHerds);
+      setHerds(
+        parsedHerds.map((herd) => ({
+          id: herd.id,
+          name: herd.name,
+          species: herd.species ?? null,
+        }))
+      );
       setAnimals(
         parsedAnimals.animals.map((animal) => {
           const detail = [animal.species, animal.breed].filter(Boolean).join(" / ");
           const prefix = animal.tagNumber?.trim() ? `Tag ${animal.tagNumber}` : "Animal";
-          return { id: animal.animalId, label: detail ? `${prefix} (${detail})` : prefix };
+          return { id: animal.animalId, label: detail ? `${prefix} (${detail})` : prefix, species: animal.species ?? null };
         })
       );
       setAssets(parsedAssets.assets ?? []);
@@ -281,19 +368,22 @@ export default function WorkingDayPlanPage() {
     }
   }
 
-  async function loadPlan(date: string) {
+  async function loadPlan(date: string): Promise<WorkingDayPlanResponse | null> {
     if (!activeRanchId) {
       setPlanData(null);
-      return;
+      return null;
     }
     setLoadingPlan(true);
     setError(null);
     try {
       const raw = await apiGet(`/working-day/plan?date=${encodeURIComponent(date)}`);
-      setPlanData(WorkingDayPlanResponseSchema.parse(raw));
+      const parsed = WorkingDayPlanResponseSchema.parse(raw);
+      setPlanData(parsed);
+      return parsed;
     } catch (err: unknown) {
       setPlanData(null);
       setError(err instanceof Error ? err.message : "Failed to load working day plan");
+      return null;
     } finally {
       setLoadingPlan(false);
     }
@@ -325,8 +415,9 @@ export default function WorkingDayPlanPage() {
     return parsed.plan.id;
   }
 
-  async function refresh() {
-    await Promise.all([loadPlan(planDate), loadPlanInventory(planInventoryWindowDays)]);
+  async function refresh(): Promise<WorkingDayPlanResponse | null> {
+    const [latestPlan] = await Promise.all([loadPlan(planDate), loadPlanInventory(planInventoryWindowDays)]);
+    return latestPlan;
   }
 
   async function createPlanForSelectedDate(targetDate: string) {
@@ -403,6 +494,104 @@ export default function WorkingDayPlanPage() {
     setItemDialogOpen(true);
   }
 
+  function setGuidedFlowQueue(queue: GuidedSupplyBindingRequest[]) {
+    setGuidedQueue(queue);
+    const next = queue[0] ?? null;
+    setActiveGuidedRequest(next);
+    setGuidedDialogOpen(Boolean(next));
+  }
+
+  function clearGuidedFlow() {
+    setGuidedFlowQueue([]);
+    setGuidedOptionsError(null);
+    setTagPartOptions([]);
+    setMedicationOptions([]);
+    setSelectedTagPartId("");
+    setSelectedMedicationStandardId("");
+  }
+
+  function advanceGuidedFlow() {
+    const [, ...rest] = guidedQueue;
+    setGuidedFlowQueue(rest);
+  }
+
+  function resolveSpeciesForItem(item: WorkingDayPlanItem): string | null {
+    if (item.animalId) {
+      const species = animals.find((animal) => animal.id === item.animalId)?.species ?? null;
+      const normalized = species?.trim();
+      return normalized?.length ? normalized : null;
+    }
+    if (item.herdId) {
+      const species = herds.find((herd) => herd.id === item.herdId)?.species ?? null;
+      const normalized = species?.trim();
+      return normalized?.length ? normalized : null;
+    }
+    return null;
+  }
+
+  function buildGuidedSupplyBindingRequests(items: WorkingDayPlanItem[], targetItemIds: string[]): GuidedSupplyBindingRequest[] {
+    const targetSet = new Set(targetItemIds);
+    const requests: GuidedSupplyBindingRequest[] = [];
+
+    for (const item of items) {
+      if (!targetSet.has(item.id)) continue;
+
+      if (isTagTaskType(item.taskType) && item.animalId) {
+        const hasLinkedTagPart = item.supplyNeeds.some(
+          (need) =>
+            String(need.supplyType ?? "").trim().toUpperCase() === "PART_SUPPLY" &&
+            String(need.linkedEntityType ?? "").trim().toUpperCase() === "EQUIPMENT_PART" &&
+            !!need.linkedEntityId
+        );
+        if (!hasLinkedTagPart) {
+          const existingNeed =
+            item.supplyNeeds.find((need) => isLikelyTagSupplyNeed(need)) ??
+            item.supplyNeeds.find((need) => String(need.supplyType ?? "").trim().toUpperCase() === "PART_SUPPLY") ??
+            null;
+          requests.push({
+            mode: "TAG",
+            itemId: item.id,
+            itemTitle: item.title,
+            taskType: item.taskType,
+            existingNeedId: existingNeed?.id ?? null,
+            requiredQuantity: existingNeed?.requiredQuantity == null ? "1" : String(existingNeed.requiredQuantity),
+            unit: existingNeed?.unit ?? "each",
+            notes: existingNeed?.notes ?? null,
+            speciesFilter: resolveSpeciesForItem(item),
+            medicationPurpose: null,
+          });
+        }
+      }
+
+      if (isMedicationTaskType(item.taskType)) {
+        const hasLinkedMedication = item.supplyNeeds.some(
+          (need) =>
+            String(need.supplyType ?? "").trim().toUpperCase() === "MEDICATION" &&
+            String(need.linkedEntityType ?? "").trim().toUpperCase() === "MEDICATION_STANDARD" &&
+            !!need.linkedEntityId
+        );
+        if (!hasLinkedMedication) {
+          const existingNeed =
+            item.supplyNeeds.find((need) => String(need.supplyType ?? "").trim().toUpperCase() === "MEDICATION") ?? null;
+          requests.push({
+            mode: "MEDICATION",
+            itemId: item.id,
+            itemTitle: item.title,
+            taskType: item.taskType,
+            existingNeedId: existingNeed?.id ?? null,
+            requiredQuantity: existingNeed?.requiredQuantity == null ? null : String(existingNeed.requiredQuantity),
+            unit: existingNeed?.unit ?? null,
+            notes: existingNeed?.notes ?? null,
+            speciesFilter: resolveSpeciesForItem(item),
+            medicationPurpose: defaultMedicationPurposeForTask(item.taskType),
+          });
+        }
+      }
+    }
+
+    return requests;
+  }
+
   async function submitItem(e: FormEvent) {
     e.preventDefault();
     if (!canInteract) return;
@@ -415,6 +604,7 @@ export default function WorkingDayPlanPage() {
     setItemError(null);
     setError(null);
     try {
+      const touchedItemIds: string[] = [];
       const basePayload = {
         category: itemForm.category,
         status: itemForm.status,
@@ -432,7 +622,8 @@ export default function WorkingDayPlanPage() {
           taskType: itemForm.taskType,
           title: itemForm.title.trim() || null,
         });
-        WorkingDayPlanItemResponseSchema.parse(raw);
+        const parsed = WorkingDayPlanItemResponseSchema.parse(raw);
+        touchedItemIds.push(parsed.item.id);
       } else {
         const createTaskTypes = Array.from(
           new Set([itemForm.taskType, ...additionalTaskTypes.filter((taskType) => taskType !== itemForm.taskType)])
@@ -446,13 +637,96 @@ export default function WorkingDayPlanPage() {
             title: idx === 0 ? itemForm.title.trim() || null : null,
             applySuggestedNeeds: itemForm.applySuggestedNeeds,
           });
-          WorkingDayPlanItemResponseSchema.parse(raw);
+          const parsed = WorkingDayPlanItemResponseSchema.parse(raw);
+          touchedItemIds.push(parsed.item.id);
         }
       }
       setItemDialogOpen(false);
-      await refresh();
+      const latestPlan = await refresh();
+      if (latestPlan && touchedItemIds.length > 0) {
+        const requests = buildGuidedSupplyBindingRequests(latestPlan.items, touchedItemIds);
+        if (requests.length > 0) setGuidedFlowQueue(requests);
+      }
     } catch (err: unknown) {
       setItemError(err instanceof Error ? err.message : "Failed to save plan item");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitGuidedSupplyBinding(e: FormEvent) {
+    e.preventDefault();
+    if (!canInteract || !activeGuidedRequest) return;
+
+    const isTagFlow = activeGuidedRequest.mode === "TAG";
+    if (isTagFlow && !selectedTagPartId) {
+      setGuidedOptionsError("Select a tag inventory item to continue.");
+      return;
+    }
+    if (!isTagFlow && !selectedMedicationStandardId) {
+      setGuidedOptionsError("Select a medication standard to continue.");
+      return;
+    }
+
+    setSaving(true);
+    setGuidedOptionsError(null);
+    setError(null);
+
+    try {
+      if (isTagFlow) {
+        const selectedPart = tagPartOptions.find((part) => part.id === selectedTagPartId);
+        if (!selectedPart) throw new Error("Selected tag part was not found.");
+
+        const payload = {
+          supplyType: "PART_SUPPLY" as const,
+          linkedEntityType: "EQUIPMENT_PART",
+          linkedEntityId: selectedPart.id,
+          nameOverride: selectedPart.name,
+          requiredQuantity: activeGuidedRequest.requiredQuantity ?? "1",
+          unit: activeGuidedRequest.unit ?? selectedPart.defaultUnit ?? "each",
+          notes: activeGuidedRequest.notes ?? null,
+        };
+
+        if (activeGuidedRequest.existingNeedId) {
+          const raw = await apiPut(`/working-day/supply-needs/${encodeURIComponent(activeGuidedRequest.existingNeedId)}`, payload);
+          WorkingDaySupplyNeedResponseSchema.parse(raw);
+        } else {
+          const raw = await apiPost(`/working-day/items/${encodeURIComponent(activeGuidedRequest.itemId)}/supply-needs`, payload);
+          WorkingDaySupplyNeedResponseSchema.parse(raw);
+        }
+      } else {
+        const selectedMedication = medicationOptions.find((option) => option.standardId === selectedMedicationStandardId);
+        if (!selectedMedication) throw new Error("Selected medication standard was not found.");
+
+        const payload = {
+          supplyType: "MEDICATION" as const,
+          linkedEntityType: "MEDICATION_STANDARD",
+          linkedEntityId: selectedMedication.standardId,
+          nameOverride: selectedMedication.displayName,
+          requiredQuantity: activeGuidedRequest.requiredQuantity ?? null,
+          unit: activeGuidedRequest.unit ?? selectedMedication.doseUnit ?? selectedMedication.onHandUnit ?? null,
+          notes: activeGuidedRequest.notes ?? null,
+        };
+
+        if (activeGuidedRequest.existingNeedId) {
+          const raw = await apiPut(`/working-day/supply-needs/${encodeURIComponent(activeGuidedRequest.existingNeedId)}`, payload);
+          WorkingDaySupplyNeedResponseSchema.parse(raw);
+        } else {
+          const raw = await apiPost(`/working-day/items/${encodeURIComponent(activeGuidedRequest.itemId)}/supply-needs`, payload);
+          WorkingDaySupplyNeedResponseSchema.parse(raw);
+        }
+      }
+
+      const latestPlan = await refresh();
+      const remainingQueue = guidedQueue.slice(1);
+      if (latestPlan && remainingQueue.length > 0) {
+        const remainingIds = remainingQueue.map((row) => row.itemId);
+        setGuidedFlowQueue(buildGuidedSupplyBindingRequests(latestPlan.items, remainingIds));
+      } else {
+        setGuidedFlowQueue(remainingQueue);
+      }
+    } catch (err: unknown) {
+      setGuidedOptionsError(err instanceof Error ? err.message : "Failed to save task supply selection");
     } finally {
       setSaving(false);
     }
@@ -645,6 +919,7 @@ export default function WorkingDayPlanPage() {
       setHerds([]);
       setAnimals([]);
       setAssets([]);
+      clearGuidedFlow();
       return;
     }
     void loadReferences();
@@ -662,6 +937,64 @@ export default function WorkingDayPlanPage() {
     void loadPlanInventory(planInventoryWindowDays);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRanchId, planInventoryWindowDays]);
+
+  useEffect(() => {
+    if (!activeGuidedRequest || !activeRanchId) return;
+    let alive = true;
+
+    const loadGuidedOptions = async () => {
+      setGuidedOptionsLoading(true);
+      setGuidedOptionsError(null);
+      try {
+        if (activeGuidedRequest.mode === "TAG") {
+          const raw = await apiGet("/working-day/supply-options/parts?category=IDENTIFICATION");
+          const parsed = WorkingDaySupplyOptionsPartsResponseSchema.parse(raw);
+          if (!alive) return;
+          setTagPartOptions(parsed.parts);
+          setMedicationOptions([]);
+          setSelectedTagPartId((current) => {
+            if (current && parsed.parts.some((part) => part.id === current)) return current;
+            return parsed.parts[0]?.id ?? "";
+          });
+          setSelectedMedicationStandardId("");
+          return;
+        }
+
+        const params = new URLSearchParams();
+        if (activeGuidedRequest.medicationPurpose) params.set("purpose", activeGuidedRequest.medicationPurpose);
+        if (activeGuidedRequest.speciesFilter) params.set("species", activeGuidedRequest.speciesFilter);
+        const query = params.toString();
+        const raw = await apiGet(
+          query
+            ? `/working-day/supply-options/medications?${query}`
+            : "/working-day/supply-options/medications"
+        );
+        const parsed = WorkingDaySupplyOptionsMedicationsResponseSchema.parse(raw);
+        if (!alive) return;
+        setMedicationOptions(parsed.medications);
+        setTagPartOptions([]);
+        setSelectedMedicationStandardId((current) => {
+          if (current && parsed.medications.some((med) => med.standardId === current)) return current;
+          return parsed.medications[0]?.standardId ?? "";
+        });
+        setSelectedTagPartId("");
+      } catch (err: unknown) {
+        if (!alive) return;
+        setGuidedOptionsError(err instanceof Error ? err.message : "Failed to load guided supply options");
+        setTagPartOptions([]);
+        setMedicationOptions([]);
+        setSelectedTagPartId("");
+        setSelectedMedicationStandardId("");
+      } finally {
+        if (alive) setGuidedOptionsLoading(false);
+      }
+    };
+
+    void loadGuidedOptions();
+    return () => {
+      alive = false;
+    };
+  }, [activeGuidedRequest, activeRanchId]);
 
   return (
     <div className="p-6 space-y-6">
@@ -1165,6 +1498,149 @@ export default function WorkingDayPlanPage() {
                   : additionalTaskTypes.length > 0
                   ? `Create ${additionalTaskTypes.length + 1} Items`
                   : "Create Item"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={guidedDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) clearGuidedFlow();
+        }}
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>
+              {activeGuidedRequest?.mode === "TAG" ? "Select Tag Supply" : "Select Medication Standard"}
+            </DialogTitle>
+            <DialogDescription>
+              {activeGuidedRequest
+                ? `${activeGuidedRequest.itemTitle} (${enumLabel(activeGuidedRequest.taskType)})`
+                : "Select the supply to link for this task."}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitGuidedSupplyBinding} className="space-y-4">
+            {guidedOptionsError ? <div className="text-sm text-red-600">{guidedOptionsError}</div> : null}
+
+            {activeGuidedRequest?.mode === "TAG" ? (
+              <div className="space-y-3">
+                <div className="text-sm text-stone-700">
+                  Tag/ID tasks should link to a specific IDENTIFICATION part so readiness can check inventory.
+                </div>
+
+                {guidedOptionsLoading ? (
+                  <div className="text-sm text-stone-500">Loading tag inventory options...</div>
+                ) : tagPartOptions.length === 0 ? (
+                  <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                    No IDENTIFICATION parts found. Add tag inventory under Parts/Supplies, then return and link it.
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="wdp-guided-tag-part">Tag Inventory Item</Label>
+                      <Select value={selectedTagPartId || "UNSET"} onValueChange={(value) => setSelectedTagPartId(value === "UNSET" ? "" : value)} disabled={!canInteract}>
+                        <SelectTrigger id="wdp-guided-tag-part" aria-label="Tag inventory item">
+                          <SelectValue placeholder="Select a tag item" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UNSET">Select a tag item</SelectItem>
+                          {tagPartOptions.map((part) => (
+                            <SelectItem key={part.id} value={part.id}>
+                              {part.name} | On hand {part.onHandQuantity} {part.defaultUnit}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {activeGuidedTagPart ? (
+                      <div className="rounded border bg-stone-50 p-3 text-sm text-stone-700">
+                        <div>
+                          Required: {activeGuidedTagRequiredQuantity} {activeGuidedRequest?.unit ?? activeGuidedTagPart.defaultUnit ?? "each"}
+                        </div>
+                        <div>
+                          On hand: {activeGuidedTagPart.onHandQuantity} {activeGuidedTagPart.defaultUnit}
+                        </div>
+                        <div className="font-medium">
+                          Status:{" "}
+                          {activeGuidedTagOnHandQuantity == null
+                            ? "Unknown"
+                            : activeGuidedTagOnHandQuantity <= 0
+                            ? "Out"
+                            : activeGuidedTagOnHandQuantity < activeGuidedTagRequiredQuantity
+                            ? "Low"
+                            : "Enough"}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="text-sm text-stone-700">
+                  Select the medication standard for this task to link it with ranch medication inventory/readiness.
+                </div>
+                <div className="text-xs text-stone-600">
+                  Filtered by purpose: {activeGuidedRequest?.medicationPurpose ? enumLabel(activeGuidedRequest.medicationPurpose) : "Any"}
+                  {activeGuidedRequest?.speciesFilter ? ` | Species: ${activeGuidedRequest.speciesFilter}` : ""}
+                </div>
+
+                {guidedOptionsLoading ? (
+                  <div className="text-sm text-stone-500">Loading medication options...</div>
+                ) : medicationOptions.length === 0 ? (
+                  <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                    No matching active medication standards found for this ranch.
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="wdp-guided-medication">Medication Standard</Label>
+                      <Select value={selectedMedicationStandardId || "UNSET"} onValueChange={(value) => setSelectedMedicationStandardId(value === "UNSET" ? "" : value)} disabled={!canInteract}>
+                        <SelectTrigger id="wdp-guided-medication" aria-label="Medication standard">
+                          <SelectValue placeholder="Select a medication" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UNSET">Select a medication</SelectItem>
+                          {medicationOptions.map((option) => (
+                            <SelectItem key={option.standardId} value={option.standardId}>
+                              {option.displayName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {activeGuidedMedication ? (
+                      <div className="rounded border bg-stone-50 p-3 text-sm text-stone-700">
+                        <div>Purpose: {activeGuidedMedication.purpose ? enumLabel(activeGuidedMedication.purpose) : "Not set"}</div>
+                        <div>
+                          On hand: {activeGuidedMedication.onHandQuantity ?? "Unknown"}{" "}
+                          {activeGuidedMedication.onHandUnit ?? ""}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={advanceGuidedFlow} disabled={saving}>
+                Skip for now
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  !canInteract ||
+                  guidedOptionsLoading ||
+                  !activeGuidedRequest ||
+                  (activeGuidedRequest.mode === "TAG" ? !selectedTagPartId : !selectedMedicationStandardId)
+                }
+              >
+                {saving ? "Saving..." : "Link Supply"}
               </Button>
             </DialogFooter>
           </form>
