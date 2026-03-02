@@ -621,7 +621,6 @@ export default function EquipmentAssetsPage() {
       return;
     }
     void loadMaintenanceEvents(detail.asset.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.asset.id, detail?.asset.trackMaintenance]);
 
   return (

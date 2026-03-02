@@ -561,7 +561,7 @@ export default function HardwareMaintenanceLogPage() {
                         Edit
                       </Button>
                       <label className="inline-flex">
-                        <input
+                        <Input
                           type="file"
                           multiple
                           className="hidden"

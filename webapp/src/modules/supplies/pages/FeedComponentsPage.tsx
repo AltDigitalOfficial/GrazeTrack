@@ -384,7 +384,6 @@ export function FeedComponentsManager({
   useEffect(() => {
     setCategoryFilterMode(defaultCategoryFilter);
     setCategory(defaultFormCategory);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultCategoryFilter, defaultFormCategory]);
 
   useEffect(() => {

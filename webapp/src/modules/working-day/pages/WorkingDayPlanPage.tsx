@@ -9,6 +9,7 @@ import {
   WorkingDayPlanCreateResponseSchema,
   WorkingDayPlanInventoryResponseSchema,
   WorkingDayPlanItemResponseSchema,
+  WorkingDayMedicationEstimateResponseSchema,
   WorkingDayPlanResponseSchema,
   WorkingDaySupplyOptionsMedicationsResponseSchema,
   WorkingDaySupplyOptionsPartsResponseSchema,
@@ -18,6 +19,7 @@ import {
   type WorkingDayPlanItem,
   type WorkingDayPlanItemStatus,
   type WorkingDayPlanResponse,
+  type WorkingDayMedicationEstimate,
   type WorkingDaySupplyOptionMedication,
   type WorkingDaySupplyOptionPart,
   type WorkingDaySupplyType,
@@ -237,6 +239,14 @@ function isLikelyTagSupplyNeed(need: WorkingDayPlanItem["supplyNeeds"][number]):
   return /(^|[^a-z])tags?([^a-z]|$)/.test(text) || text.includes("identification");
 }
 
+function parsePositiveNumber(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed.length) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
 export default function WorkingDayPlanPage() {
   const { toast } = useToast();
   const { activeRanchId, loading: ranchLoading } = useRanch();
@@ -284,6 +294,10 @@ export default function WorkingDayPlanPage() {
   const [medicationOptions, setMedicationOptions] = useState<WorkingDaySupplyOptionMedication[]>([]);
   const [selectedTagPartId, setSelectedTagPartId] = useState("");
   const [selectedMedicationStandardId, setSelectedMedicationStandardId] = useState("");
+  const [medicationFallbackAverageWeight, setMedicationFallbackAverageWeight] = useState("");
+  const [medicationFallbackWeightUnit, setMedicationFallbackWeightUnit] = useState<"lb" | "kg">("lb");
+  const [medicationEstimate, setMedicationEstimate] = useState<WorkingDayMedicationEstimate | null>(null);
+  const [medicationEstimateLoading, setMedicationEstimateLoading] = useState(false);
 
   const taskCatalog = useMemo(() => planData?.taskCatalog ?? [], [planData?.taskCatalog]);
   const canInteract = !ranchLoading && !!activeRanchId && !saving && !loadingPlan;
@@ -508,6 +522,10 @@ export default function WorkingDayPlanPage() {
     setMedicationOptions([]);
     setSelectedTagPartId("");
     setSelectedMedicationStandardId("");
+    setMedicationFallbackAverageWeight("");
+    setMedicationFallbackWeightUnit("lb");
+    setMedicationEstimate(null);
+    setMedicationEstimateLoading(false);
   }
 
   function advanceGuidedFlow() {
@@ -697,14 +715,20 @@ export default function WorkingDayPlanPage() {
       } else {
         const selectedMedication = medicationOptions.find((option) => option.standardId === selectedMedicationStandardId);
         if (!selectedMedication) throw new Error("Selected medication standard was not found.");
+        const estimatedQuantity =
+          medicationEstimate?.estimatedRequiredQuantity == null
+            ? null
+            : String(medicationEstimate.estimatedRequiredQuantity);
+        const estimatedUnit =
+          medicationEstimate?.estimatedUnit == null ? null : String(medicationEstimate.estimatedUnit);
 
         const payload = {
           supplyType: "MEDICATION" as const,
           linkedEntityType: "MEDICATION_STANDARD",
           linkedEntityId: selectedMedication.standardId,
           nameOverride: selectedMedication.displayName,
-          requiredQuantity: activeGuidedRequest.requiredQuantity ?? null,
-          unit: activeGuidedRequest.unit ?? selectedMedication.doseUnit ?? selectedMedication.onHandUnit ?? null,
+          requiredQuantity: estimatedQuantity ?? activeGuidedRequest.requiredQuantity ?? null,
+          unit: estimatedUnit ?? activeGuidedRequest.unit ?? selectedMedication.doseUnit ?? selectedMedication.onHandUnit ?? null,
           notes: activeGuidedRequest.notes ?? null,
         };
 
@@ -952,6 +976,8 @@ export default function WorkingDayPlanPage() {
           if (!alive) return;
           setTagPartOptions(parsed.parts);
           setMedicationOptions([]);
+          setMedicationEstimate(null);
+          setMedicationFallbackAverageWeight("");
           setSelectedTagPartId((current) => {
             if (current && parsed.parts.some((part) => part.id === current)) return current;
             return parsed.parts[0]?.id ?? "";
@@ -973,6 +999,8 @@ export default function WorkingDayPlanPage() {
         if (!alive) return;
         setMedicationOptions(parsed.medications);
         setTagPartOptions([]);
+        setMedicationEstimate(null);
+        setMedicationFallbackAverageWeight("");
         setSelectedMedicationStandardId((current) => {
           if (current && parsed.medications.some((med) => med.standardId === current)) return current;
           return parsed.medications[0]?.standardId ?? "";
@@ -995,6 +1023,64 @@ export default function WorkingDayPlanPage() {
       alive = false;
     };
   }, [activeGuidedRequest, activeRanchId]);
+
+  useEffect(() => {
+    if (!activeGuidedRequest || activeGuidedRequest.mode !== "MEDICATION" || !selectedMedicationStandardId) {
+      setMedicationEstimate(null);
+      setMedicationEstimateLoading(false);
+      return;
+    }
+    let alive = true;
+
+    const loadMedicationEstimate = async () => {
+      setMedicationEstimateLoading(true);
+      setGuidedOptionsError(null);
+      try {
+        const params = new URLSearchParams();
+        params.set("standardId", selectedMedicationStandardId);
+        const fallbackAverage = parsePositiveNumber(medicationFallbackAverageWeight);
+        if (fallbackAverage !== null) {
+          params.set("fallbackAverageWeight", String(fallbackAverage));
+          params.set("fallbackWeightUnit", medicationFallbackWeightUnit);
+        }
+        const raw = await apiGet(
+          `/working-day/items/${encodeURIComponent(activeGuidedRequest.itemId)}/medication-estimate?${params.toString()}`
+        );
+        const parsed = WorkingDayMedicationEstimateResponseSchema.parse(raw);
+        if (!alive) return;
+        setMedicationEstimate(parsed.estimate);
+      } catch (err: unknown) {
+        if (!alive) return;
+        setMedicationEstimate(null);
+        setGuidedOptionsError(err instanceof Error ? err.message : "Failed to compute medication quantity estimate");
+      } finally {
+        if (alive) setMedicationEstimateLoading(false);
+      }
+    };
+
+    void loadMedicationEstimate();
+    return () => {
+      alive = false;
+    };
+  }, [
+    activeGuidedRequest,
+    selectedMedicationStandardId,
+    medicationFallbackAverageWeight,
+    medicationFallbackWeightUnit,
+  ]);
+
+  useEffect(() => {
+    if (!activeGuidedRequest || activeGuidedRequest.mode !== "MEDICATION") return;
+    const selected = medicationOptions.find((med) => med.standardId === selectedMedicationStandardId);
+    const normalized = String(selected?.doseWeightUnit ?? "")
+      .trim()
+      .toLowerCase();
+    if (normalized === "lb" || normalized === "lbs" || normalized === "pound" || normalized === "pounds") {
+      setMedicationFallbackWeightUnit("lb");
+    } else if (normalized === "kg" || normalized === "kgs" || normalized === "kilogram" || normalized === "kilograms") {
+      setMedicationFallbackWeightUnit("kg");
+    }
+  }, [activeGuidedRequest, medicationOptions, selectedMedicationStandardId]);
 
   return (
     <div className="p-6 space-y-6">
@@ -1620,6 +1706,61 @@ export default function WorkingDayPlanPage() {
                           On hand: {activeGuidedMedication.onHandQuantity ?? "Unknown"}{" "}
                           {activeGuidedMedication.onHandUnit ?? ""}
                         </div>
+                        <div>
+                          Dosing model: {activeGuidedMedication.dosingBasis ? enumLabel(activeGuidedMedication.dosingBasis) : "Not set"}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {medicationEstimateLoading ? (
+                      <div className="text-sm text-stone-500">Calculating estimated required quantity...</div>
+                    ) : medicationEstimate ? (
+                      <div className="space-y-3 rounded border bg-stone-50 p-3 text-sm text-stone-700">
+                        <div>
+                          Animals: {medicationEstimate.animalCount} | Missing weights: {medicationEstimate.missingWeightCount}
+                        </div>
+                        <div>{medicationEstimate.message}</div>
+                        {medicationEstimate.estimatedRequiredQuantity != null ? (
+                          <div className="font-medium">
+                            Estimated required: {medicationEstimate.estimatedRequiredQuantity} {medicationEstimate.estimatedUnit ?? ""}
+                          </div>
+                        ) : medicationEstimate.measuredOnlyEstimatedQuantity != null ? (
+                          <div className="font-medium">
+                            Measured-only estimate: {medicationEstimate.measuredOnlyEstimatedQuantity} {medicationEstimate.estimatedUnit ?? ""}
+                          </div>
+                        ) : (
+                          <div className="font-medium">Estimated required: not available yet</div>
+                        )}
+                        {medicationEstimate.hasMissingWeights ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label htmlFor="wdp-med-fallback-weight">Estimated average weight for missing animals</Label>
+                              <Input
+                                id="wdp-med-fallback-weight"
+                                value={medicationFallbackAverageWeight}
+                                onChange={(e) => setMedicationFallbackAverageWeight(e.target.value)}
+                                placeholder="Optional"
+                                disabled={!canInteract}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="wdp-med-fallback-unit">Weight unit</Label>
+                              <Select
+                                value={medicationFallbackWeightUnit}
+                                onValueChange={(value) => setMedicationFallbackWeightUnit(value === "kg" ? "kg" : "lb")}
+                                disabled={!canInteract}
+                              >
+                                <SelectTrigger id="wdp-med-fallback-unit" aria-label="Fallback weight unit">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="lb">lb</SelectItem>
+                                  <SelectItem value="kg">kg</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </>

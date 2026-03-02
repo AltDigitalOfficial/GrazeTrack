@@ -60,6 +60,33 @@ export const WorkingDaySupplyOptionsMedicationsResponseSchema = z.object({
   medications: z.array(WorkingDaySupplyOptionMedicationSchema),
 });
 
+export const WorkingDayMedicationEstimateSchema = z.object({
+  itemId: z.string().uuid(),
+  standardId: z.string().uuid(),
+  medicationDisplayName: z.string(),
+  dosingBasis: z.string().nullable().optional(),
+  doseValue: NumericLikeSchema.nullable().optional(),
+  doseUnit: z.string().nullable().optional(),
+  doseWeightUnit: z.string().nullable().optional(),
+  animalCount: z.number(),
+  measuredWeightCount: z.number(),
+  missingWeightCount: z.number(),
+  fallbackAverageWeight: NumericLikeSchema.nullable().optional(),
+  fallbackWeightUnit: z.string().nullable().optional(),
+  totalWeightInDoseWeightUnit: NumericLikeSchema.nullable().optional(),
+  measuredOnlyEstimatedQuantity: NumericLikeSchema.nullable().optional(),
+  estimatedRequiredQuantity: NumericLikeSchema.nullable().optional(),
+  estimatedUnit: z.string().nullable().optional(),
+  requiresFallbackForFullEstimate: z.boolean(),
+  hasMissingWeights: z.boolean(),
+  growthBufferMultiplier: NumericLikeSchema,
+  message: z.string(),
+});
+
+export const WorkingDayMedicationEstimateResponseSchema = z.object({
+  estimate: WorkingDayMedicationEstimateSchema,
+});
+
 export const WorkingDayPlanSchema = z.object({
   id: z.string().uuid(),
   ranchId: z.string().uuid(),
@@ -243,6 +270,7 @@ export type WorkingDaySupplyType = z.infer<typeof WorkingDaySupplyTypeSchema>;
 export type WorkingDayTaskCatalogItem = z.infer<typeof WorkingDayTaskCatalogItemSchema>;
 export type WorkingDaySupplyOptionPart = z.infer<typeof WorkingDaySupplyOptionPartSchema>;
 export type WorkingDaySupplyOptionMedication = z.infer<typeof WorkingDaySupplyOptionMedicationSchema>;
+export type WorkingDayMedicationEstimate = z.infer<typeof WorkingDayMedicationEstimateSchema>;
 export type WorkingDayPlan = z.infer<typeof WorkingDayPlanSchema>;
 export type WorkingDayPlanItem = z.infer<typeof WorkingDayPlanItemSchema>;
 export type WorkingDayPlanItemSupplyNeed = z.infer<typeof WorkingDayPlanItemSupplyNeedSchema>;

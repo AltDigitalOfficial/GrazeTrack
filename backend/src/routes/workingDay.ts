@@ -5,6 +5,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm"
 import { db } from "../db";
 import {
   animalHerdMembership,
+  animalMeasurements,
   animals,
   equipmentAssets,
   equipmentMaintenanceEvents,
@@ -166,6 +167,29 @@ function toNumeric(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function normalizeWeightUnit(unit: unknown): "lb" | "kg" | null {
+  const normalized = String(unit ?? "")
+    .trim()
+    .toLowerCase();
+  if (!normalized.length) return null;
+  if (normalized === "lb" || normalized === "lbs" || normalized === "pound" || normalized === "pounds") return "lb";
+  if (normalized === "kg" || normalized === "kgs" || normalized === "kilogram" || normalized === "kilograms") return "kg";
+  return null;
+}
+
+function convertWeight(value: number, fromUnit: "lb" | "kg", toUnit: "lb" | "kg"): number {
+  if (fromUnit === toUnit) return value;
+  if (fromUnit === "kg" && toUnit === "lb") return value * 2.2046226218;
+  if (fromUnit === "lb" && toUnit === "kg") return value / 2.2046226218;
+  return value;
+}
+
+function decimalString(value: number, places = 4): string {
+  if (!Number.isFinite(value)) return "0";
+  const rounded = Number(value.toFixed(places));
+  return String(rounded);
 }
 
 function labelFromTaskType(taskType: string): string {
@@ -942,6 +966,12 @@ const SupplyOptionsMedicationsQuerySchema = RanchScopedSchema.extend({
   search: z.string().optional().nullable(),
 });
 
+const MedicationEstimateQuerySchema = RanchScopedSchema.extend({
+  standardId: z.string().uuid(),
+  fallbackAverageWeight: z.union([z.string(), z.number()]).optional().nullable(),
+  fallbackWeightUnit: z.string().optional().nullable(),
+});
+
 export async function workingDayRoutes(app: FastifyInstance) {
   app.get("/working-day/task-catalog", { preHandler: requireAuth }, async (req, reply) => {
     try {
@@ -1120,6 +1150,280 @@ export async function workingDayRoutes(app: FastifyInstance) {
         err,
         "Failed to list working day medication supply options",
         "Failed to list working day medication supply options"
+      );
+    }
+  });
+
+  app.get("/working-day/items/:itemId/medication-estimate", { preHandler: requireAuth }, async (req, reply) => {
+    try {
+      const { itemId } = ItemIdParamSchema.parse(req.params ?? {});
+      const query = MedicationEstimateQuerySchema.parse(req.query ?? {});
+      const ranchId = await resolveRanchId(req.auth!.userId, query.ranchId ?? null);
+      if (!ranchId) return reply.status(400).send({ error: "No ranch selected" });
+
+      const item = await ensureItemScope(ranchId, itemId);
+      if (!isMedicationTaskType(item.taskType)) {
+        return reply.status(400).send({ error: "Dose estimation is only available for medication tasks." });
+      }
+
+      const standardRows = await db
+        .select({
+          standardId: ranchMedicationStandards.id,
+          purpose: standardMedications.purpose,
+          dosingBasis: standardMedications.dosingBasis,
+          doseValue: standardMedications.doseValue,
+          doseUnit: standardMedications.doseUnit,
+          doseWeightUnit: standardMedications.doseWeightUnit,
+          chemicalName: standardMedications.chemicalName,
+          brandName: standardMedications.brandName,
+          manufacturerName: standardMedications.manufacturerName,
+          format: standardMedications.format,
+          concentrationValue: standardMedications.concentrationValue,
+          concentrationUnit: standardMedications.concentrationUnit,
+        })
+        .from(ranchMedicationStandards)
+        .innerJoin(
+          standardMedications,
+          and(
+            eq(standardMedications.id, ranchMedicationStandards.standardMedicationId),
+            eq(standardMedications.ranchId, ranchId)
+          )
+        )
+        .where(and(eq(ranchMedicationStandards.ranchId, ranchId), eq(ranchMedicationStandards.id, query.standardId)))
+        .limit(1);
+
+      const standard = standardRows[0];
+      if (!standard) return reply.status(404).send({ error: "Medication standard not found in active ranch." });
+
+      const fallbackAverageWeight = toNumeric(query.fallbackAverageWeight);
+      if (fallbackAverageWeight !== null && fallbackAverageWeight <= 0) {
+        return reply.status(400).send({ error: "fallbackAverageWeight must be greater than 0." });
+      }
+
+      let animalIds: string[] = [];
+      if (item.animalId) {
+        animalIds = [item.animalId];
+      } else if (item.herdId) {
+        const membershipRows = await db
+          .select({ animalId: animalHerdMembership.animalId })
+          .from(animalHerdMembership)
+          .where(and(eq(animalHerdMembership.herdId, item.herdId), isNull(animalHerdMembership.endAt)));
+        animalIds = Array.from(new Set(membershipRows.map((row) => row.animalId)));
+      }
+
+      const animalCount = animalIds.length;
+      const dosingBasis = String(standard.dosingBasis ?? "").trim().toUpperCase();
+      const doseValue = toNumeric(standard.doseValue);
+      const doseUnit = standard.doseUnit?.trim() || null;
+      const doseWeightUnitNormalized = normalizeWeightUnit(standard.doseWeightUnit);
+      const fallbackWeightUnitNormalized =
+        normalizeWeightUnit(query.fallbackWeightUnit) ?? doseWeightUnitNormalized;
+
+      if (!animalCount) {
+        return reply.send({
+          estimate: {
+            itemId,
+            standardId: standard.standardId,
+            medicationDisplayName: buildMedicationDisplayName(standard),
+            dosingBasis: dosingBasis || null,
+            doseValue: standard.doseValue,
+            doseUnit,
+            doseWeightUnit: standard.doseWeightUnit,
+            animalCount: 0,
+            measuredWeightCount: 0,
+            missingWeightCount: 0,
+            fallbackAverageWeight: fallbackAverageWeight === null ? null : decimalString(fallbackAverageWeight),
+            fallbackWeightUnit: fallbackWeightUnitNormalized,
+            totalWeightInDoseWeightUnit: null,
+            measuredOnlyEstimatedQuantity: null,
+            estimatedRequiredQuantity: null,
+            estimatedUnit: doseUnit,
+            requiresFallbackForFullEstimate: false,
+            hasMissingWeights: false,
+            growthBufferMultiplier: dosingBasis === "PER_WEIGHT" ? "1.05" : "1.0",
+            message: "No animals are currently targeted by this plan item.",
+          },
+        });
+      }
+
+      if (!doseValue || !doseUnit || (dosingBasis !== "PER_HEAD" && dosingBasis !== "PER_WEIGHT")) {
+        return reply.send({
+          estimate: {
+            itemId,
+            standardId: standard.standardId,
+            medicationDisplayName: buildMedicationDisplayName(standard),
+            dosingBasis: dosingBasis || null,
+            doseValue: standard.doseValue,
+            doseUnit,
+            doseWeightUnit: standard.doseWeightUnit,
+            animalCount,
+            measuredWeightCount: 0,
+            missingWeightCount: dosingBasis === "PER_WEIGHT" ? animalCount : 0,
+            fallbackAverageWeight: fallbackAverageWeight === null ? null : decimalString(fallbackAverageWeight),
+            fallbackWeightUnit: fallbackWeightUnitNormalized,
+            totalWeightInDoseWeightUnit: null,
+            measuredOnlyEstimatedQuantity: null,
+            estimatedRequiredQuantity: null,
+            estimatedUnit: doseUnit,
+            requiresFallbackForFullEstimate: false,
+            hasMissingWeights: false,
+            growthBufferMultiplier: dosingBasis === "PER_WEIGHT" ? "1.05" : "1.0",
+            message:
+              "Medication dosing model is incomplete. Set dosing basis, dose value, and dose unit to compute estimate.",
+          },
+        });
+      }
+
+      if (dosingBasis === "PER_HEAD") {
+        const estimatedRequiredQuantity = decimalString(animalCount * doseValue);
+        return reply.send({
+          estimate: {
+            itemId,
+            standardId: standard.standardId,
+            medicationDisplayName: buildMedicationDisplayName(standard),
+            dosingBasis,
+            doseValue: standard.doseValue,
+            doseUnit,
+            doseWeightUnit: standard.doseWeightUnit,
+            animalCount,
+            measuredWeightCount: 0,
+            missingWeightCount: 0,
+            fallbackAverageWeight: null,
+            fallbackWeightUnit: null,
+            totalWeightInDoseWeightUnit: null,
+            measuredOnlyEstimatedQuantity: estimatedRequiredQuantity,
+            estimatedRequiredQuantity,
+            estimatedUnit: doseUnit,
+            requiresFallbackForFullEstimate: false,
+            hasMissingWeights: false,
+            growthBufferMultiplier: "1.0",
+            message: "Estimated from per-head dose and animal count.",
+          },
+        });
+      }
+
+      if (!doseWeightUnitNormalized) {
+        return reply.send({
+          estimate: {
+            itemId,
+            standardId: standard.standardId,
+            medicationDisplayName: buildMedicationDisplayName(standard),
+            dosingBasis,
+            doseValue: standard.doseValue,
+            doseUnit,
+            doseWeightUnit: standard.doseWeightUnit,
+            animalCount,
+            measuredWeightCount: 0,
+            missingWeightCount: animalCount,
+            fallbackAverageWeight: fallbackAverageWeight === null ? null : decimalString(fallbackAverageWeight),
+            fallbackWeightUnit: fallbackWeightUnitNormalized,
+            totalWeightInDoseWeightUnit: null,
+            measuredOnlyEstimatedQuantity: null,
+            estimatedRequiredQuantity: null,
+            estimatedUnit: doseUnit,
+            requiresFallbackForFullEstimate: false,
+            hasMissingWeights: false,
+            growthBufferMultiplier: "1.05",
+            message: "Per-weight dosing requires a valid dose weight unit (lb or kg).",
+          },
+        });
+      }
+
+      const weightRows = await db
+        .select({
+          animalId: animalMeasurements.animalId,
+          valueNumber: animalMeasurements.valueNumber,
+          unit: animalMeasurements.unit,
+          measuredAt: animalMeasurements.measuredAt,
+          createdAt: animalMeasurements.createdAt,
+        })
+        .from(animalMeasurements)
+        .where(
+          and(
+            eq(animalMeasurements.ranchId, ranchId),
+            inArray(animalMeasurements.animalId, animalIds),
+            sql`lower(${animalMeasurements.measurementType}) = 'weight'`
+          )
+        )
+        .orderBy(asc(animalMeasurements.animalId), desc(animalMeasurements.measuredAt), desc(animalMeasurements.createdAt));
+
+      const latestWeightByAnimal = new Map<string, { valueNumber: string | null; unit: string | null }>();
+      for (const row of weightRows) {
+        if (latestWeightByAnimal.has(row.animalId)) continue;
+        latestWeightByAnimal.set(row.animalId, { valueNumber: row.valueNumber, unit: row.unit });
+      }
+
+      let measuredWeightCount = 0;
+      let measuredWeightTotalInDoseUnit = 0;
+      for (const animalId of animalIds) {
+        const row = latestWeightByAnimal.get(animalId);
+        const rawValue = toNumeric(row?.valueNumber);
+        const fromWeightUnit = normalizeWeightUnit(row?.unit);
+        if (!rawValue || rawValue <= 0 || !fromWeightUnit) continue;
+        measuredWeightTotalInDoseUnit += convertWeight(rawValue, fromWeightUnit, doseWeightUnitNormalized);
+        measuredWeightCount += 1;
+      }
+
+      const missingWeightCount = Math.max(0, animalCount - measuredWeightCount);
+      let fallbackAverageInDoseUnit: number | null = null;
+      if (fallbackAverageWeight !== null && fallbackWeightUnitNormalized) {
+        fallbackAverageInDoseUnit = convertWeight(
+          fallbackAverageWeight,
+          fallbackWeightUnitNormalized,
+          doseWeightUnitNormalized
+        );
+      }
+
+      const fallbackWeightContribution =
+        fallbackAverageInDoseUnit !== null && missingWeightCount > 0
+          ? fallbackAverageInDoseUnit * missingWeightCount
+          : 0;
+      const totalWeightInDoseWeightUnit = measuredWeightTotalInDoseUnit + fallbackWeightContribution;
+      const measuredOnlyEstimatedQuantity = measuredWeightTotalInDoseUnit > 0
+        ? decimalString(measuredWeightTotalInDoseUnit * doseValue * 1.05)
+        : null;
+
+      const requiresFallbackForFullEstimate = missingWeightCount > 0 && fallbackAverageInDoseUnit === null;
+      const estimatedRequiredQuantity =
+        !requiresFallbackForFullEstimate && totalWeightInDoseWeightUnit > 0
+          ? decimalString(totalWeightInDoseWeightUnit * doseValue * 1.05)
+          : null;
+
+      const message = requiresFallbackForFullEstimate
+        ? "Some animals are missing weight measurements. Provide an estimated average weight for missing animals to compute full quantity, or skip estimate."
+        : "Estimated from per-weight dosing using latest weights with a 5% buffer.";
+
+      return reply.send({
+        estimate: {
+          itemId,
+          standardId: standard.standardId,
+          medicationDisplayName: buildMedicationDisplayName(standard),
+          dosingBasis,
+          doseValue: standard.doseValue,
+          doseUnit,
+          doseWeightUnit: doseWeightUnitNormalized,
+          animalCount,
+          measuredWeightCount,
+          missingWeightCount,
+          fallbackAverageWeight: fallbackAverageWeight === null ? null : decimalString(fallbackAverageWeight),
+          fallbackWeightUnit: fallbackAverageInDoseUnit === null ? null : fallbackWeightUnitNormalized,
+          totalWeightInDoseWeightUnit: totalWeightInDoseWeightUnit > 0 ? decimalString(totalWeightInDoseWeightUnit) : null,
+          measuredOnlyEstimatedQuantity,
+          estimatedRequiredQuantity,
+          estimatedUnit: doseUnit,
+          requiresFallbackForFullEstimate,
+          hasMissingWeights: missingWeightCount > 0,
+          growthBufferMultiplier: "1.05",
+          message,
+        },
+      });
+    } catch (err) {
+      return withErrorHandling(
+        req,
+        reply,
+        err,
+        "Failed to estimate medication quantity for working day item",
+        "Failed to estimate medication quantity for working day item"
       );
     }
   });
